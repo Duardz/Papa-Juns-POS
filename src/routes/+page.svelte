@@ -1,3 +1,4 @@
+<!-- login page/landing page -->
 <script>
   import { onMount } from 'svelte';
   import { user, login, error } from '$lib/stores/auth.js';
