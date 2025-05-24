@@ -1,35 +1,84 @@
+# Dependencies
 node_modules
+.pnp
+.pnp.js
 
-# Output
+# SvelteKit build output
+.svelte-kit
+/build
+/dist
+
+# Deployment outputs
 .output
 .vercel
 .netlify
 .wrangler
-/.svelte-kit
-/build
 
-# OS
+# OS files
 .DS_Store
 Thumbs.db
+desktop.ini
 
-# Env
+# Environment variables
 .env
 .env.*
 !.env.example
 !.env.test
-
-# Vite
-vite.config.js.timestamp-*
-vite.config.ts.timestamp-*
-
-# Environment variables
-.env
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
 
+# IDE files
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea
+*.swp
+*.swo
+*~
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
 # Firebase
 .firebase/
 firebase-debug.log
 firestore-debug.log
+firestore.rules
+firestore.indexes.json
+ui-debug.log
+firebase-export-*
+
+# Vite
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+
+# Testing
+/coverage
+.nyc_output
+
+# Package manager files
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Temporary files
+*.tmp
+*.temp
+.cache
+
+# Production build analysis
+stats.html
+
+# Optional: Include lock files if you want team consistency
+# Remove these lines if you want to commit lock files
+# !package-lock.json
+# !yarn.lock
+# !pnpm-lock.yaml
