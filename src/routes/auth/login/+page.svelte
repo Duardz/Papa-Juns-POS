@@ -124,13 +124,6 @@
             {/if}
           </button>
         </form>
-
-        <!-- Demo Credentials -->
-        <div class="mt-6 pt-6 border-t text-center">
-          <p class="text-sm text-gray">Demo credentials:</p>
-          <p class="text-xs text-gray mt-1">Email: demo@papajuns.com</p>
-          <p class="text-xs text-gray">Password: demo123</p>
-        </div>
       </div>
     </div>
 
