@@ -156,20 +156,18 @@
     showToast(`Exported ${filteredOrders.length} orders to ${filename}`, 'success');
   }
 
-  // Clear order history (in real app, this would delete from Firestore)
+  // Clear order history (now actually deletes from Firestore)
   async function clearOrderHistory() {
     isDeleting = true;
     try {
-      // In a real app, you would call a service to delete orders from Firestore
-      // For now, we'll just clear the local array
-      // await ordersService.clearHistory();
+      // Actually delete from Firestore
+      const deletedCount = await ordersService.clearHistory();
       
-      // Simulate deletion
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
+      // Clear local state
       orders = [];
       showDeleteModal = false;
-      showToast('Order history cleared successfully', 'success');
+      
+      showToast(`Successfully deleted ${deletedCount} orders`, 'success');
     } catch (error) {
       console.error('Error clearing history:', error);
       showToast('Failed to clear order history', 'error');

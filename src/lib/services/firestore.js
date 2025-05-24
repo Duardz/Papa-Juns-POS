@@ -264,6 +264,47 @@ export const ordersService = {
     }
   },
 
+  // Clear all order history
+  async clearHistory() {
+    try {
+      checkDb();
+      
+      // Get all orders
+      const ordersRef = collection(db, 'orders');
+      const snapshot = await getDocs(ordersRef);
+      
+      if (snapshot.empty) {
+        console.log('No orders to delete');
+        return 0;
+      }
+      
+      // Delete in batches (Firestore has a limit of 500 operations per batch)
+      const batchSize = 500;
+      let deleted = 0;
+      
+      // Process in chunks
+      const docs = snapshot.docs;
+      for (let i = 0; i < docs.length; i += batchSize) {
+        const batch = writeBatch(db);
+        const chunk = docs.slice(i, i + batchSize);
+        
+        chunk.forEach(doc => {
+          batch.delete(doc.ref);
+        });
+        
+        await batch.commit();
+        deleted += chunk.length;
+        console.log(`Deleted ${deleted} orders so far...`);
+      }
+      
+      console.log(`Successfully deleted ${deleted} orders`);
+      return deleted;
+    } catch (error) {
+      console.error('Error clearing order history:', error);
+      throw error;
+    }
+  },
+
   // Get orders by date range
   async getByDateRange(startDate, endDate) {
     try {
