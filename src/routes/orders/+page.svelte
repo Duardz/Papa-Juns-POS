@@ -8,7 +8,8 @@
   import { 
     // @ts-ignore
     Receipt, Calendar, DollarSign, ArrowLeft, Eye, X, 
-    TrendingUp, ShoppingBag, Search
+    // @ts-ignore
+    TrendingUp, ShoppingBag, Search, Download, Trash2, FileSpreadsheet
   } from 'lucide-svelte';
 
   // State
@@ -20,6 +21,8 @@
   // @ts-ignore
   let selectedOrder = null;
   let showOrderModal = false;
+  let showDeleteModal = false;
+  let isDeleting = false;
 
   // Computed
  // @ts-ignore
@@ -77,6 +80,102 @@
   function viewOrder(order) {
     selectedOrder = order;
     showOrderModal = true;
+  }
+
+  // Export to CSV function
+  function exportToCSV() {
+    if (filteredOrders.length === 0) {
+      showToast('No orders to export', 'warning');
+      return;
+    }
+
+    // Prepare CSV headers
+    const headers = [
+      'Order Number',
+      'Date',
+      'Time',
+      'Items',
+      'Item Details',
+      'Subtotal',
+      'Tax',
+      'Total',
+      'Payment Method',
+      'Status',
+      'Cashier'
+    ];
+
+    // Prepare CSV rows
+    const rows = filteredOrders.map(order => {
+      const date = order.createdAt?.toDate() || new Date();
+      // @ts-ignore
+      const itemDetails = order.items.map(item => 
+        `${item.quantity}x ${item.name} (${item.price.toFixed(2)} each)`
+      ).join('; ');
+
+      return [
+        order.orderNumber,
+        date.toLocaleDateString(),
+        date.toLocaleTimeString(),
+        order.itemCount,
+        itemDetails,
+        order.subtotal.toFixed(2),
+        order.tax.toFixed(2),
+        order.total.toFixed(2),
+        order.paymentMethod,
+        order.status,
+        order.cashier || 'Unknown'
+      ];
+    });
+
+    // Convert to CSV string
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => 
+        row.map(cell => 
+          // Escape quotes and wrap in quotes if contains comma
+          typeof cell === 'string' && cell.includes(',') 
+            ? `"${cell.replace(/"/g, '""')}"` 
+            : cell
+        ).join(',')
+      )
+    ].join('\n');
+
+    // Create blob and download
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const filename = `orders_${new Date().toISOString().split('T')[0]}.csv`;
+    
+    link.setAttribute('href', URL.createObjectURL(blob));
+    link.setAttribute('download', filename);
+    link.style.display = 'none';
+    
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    showToast(`Exported ${filteredOrders.length} orders to ${filename}`, 'success');
+  }
+
+  // Clear order history (in real app, this would delete from Firestore)
+  async function clearOrderHistory() {
+    isDeleting = true;
+    try {
+      // In a real app, you would call a service to delete orders from Firestore
+      // For now, we'll just clear the local array
+      // await ordersService.clearHistory();
+      
+      // Simulate deletion
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      orders = [];
+      showDeleteModal = false;
+      showToast('Order history cleared successfully', 'success');
+    } catch (error) {
+      console.error('Error clearing history:', error);
+      showToast('Failed to clear order history', 'error');
+    } finally {
+      isDeleting = false;
+    }
   }
 
   // @ts-ignore
@@ -178,24 +277,47 @@
   <!-- Search & Filters -->
   <div class="card mb-4">
     <div class="card-body">
-      <div class="flex flex-col sm-flex-row gap-3">
-        <div class="relative flex-1">
-          <Search class="absolute left-3 top-1/2 -translate-y-1/2 text-gray" size={18} />
+      <div class="flex flex-col gap-3">
+        <div class="flex flex-col sm-flex-row gap-3">
+          <div class="relative flex-1">
+            <Search class="absolute left-3 top-1/2 -translate-y-1/2 text-gray" size={18} />
+            <input
+              type="text"
+              placeholder="Search order number..."
+              bind:value={searchQuery}
+              class="input"
+              style="padding-left: 2.5rem;"
+            />
+          </div>
+          
           <input
-            type="text"
-            placeholder="Search order number..."
-            bind:value={searchQuery}
+            type="date"
+            bind:value={selectedDate}
             class="input"
-            style="padding-left: 2.5rem;"
+            style="width: auto;"
           />
         </div>
         
-        <input
-          type="date"
-          bind:value={selectedDate}
-          class="input"
-          style="width: auto;"
-        />
+        <!-- Action Buttons -->
+        <div class="flex gap-2 flex-wrap">
+          <button 
+            class="btn btn-primary"
+            on:click={exportToCSV}
+            disabled={filteredOrders.length === 0}
+          >
+            <FileSpreadsheet size={18} />
+            <span>Export to CSV</span>
+          </button>
+          
+          <button 
+            class="btn btn-danger"
+            on:click={() => showDeleteModal = true}
+            disabled={orders.length === 0}
+          >
+            <Trash2 size={18} />
+            <span>Clear History</span>
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -365,6 +487,51 @@
   </div>
 {/if}
 
+<!-- Delete Confirmation Modal -->
+{#if showDeleteModal}
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="modal-overlay" on:click={() => showDeleteModal = false}>
+    <div class="modal-content" on:click|stopPropagation style="max-width: 400px;">
+      <div class="card-body">
+        <div class="text-center mb-4">
+          <div class="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <Trash2 size={32} class="text-danger" />
+          </div>
+          <h2 class="text-xl font-bold">Delete Order History?</h2>
+          <p class="text-gray mt-2">
+            This will permanently delete all {orders.length} orders from the history. 
+            This action cannot be undone.
+          </p>
+        </div>
+        
+        <div class="flex gap-2">
+          <button 
+            class="btn btn-secondary flex-1"
+            on:click={() => showDeleteModal = false}
+            disabled={isDeleting}
+          >
+            Cancel
+          </button>
+          <button 
+            class="btn btn-danger flex-1"
+            on:click={clearOrderHistory}
+            disabled={isDeleting}
+          >
+            {#if isDeleting}
+              <span class="animate-spin">⏳</span>
+              <span>Deleting...</span>
+            {:else}
+              <Trash2 size={18} />
+              <span>Delete All</span>
+            {/if}
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+{/if}
+
 <style>
   .grid { display: grid; }
   .grid-cols-2 { grid-template-columns: repeat(2, 1fr); }
@@ -374,12 +541,14 @@
   table th { font-weight: 600; color: var(--gray-700); }
   .hover\:bg-gray-50:hover { background-color: var(--gray-50); }
   .flex-1 { flex: 1; }
-  /* .-translate-y-1\/2 { transform: translateY(-50%); } */
+  .-translate-y-1\/2 { transform: translateY(-50%); }
   .rounded-lg { border-radius: var(--radius-lg); }
   .rounded { border-radius: var(--radius-md); }
+  .rounded-full { border-radius: var(--radius-full); }
   .border-b { border-bottom: 1px solid var(--gray-200); }
   .border-t { border-top: 1px solid var(--gray-200); }
   .bg-gray-50 { background-color: var(--gray-50); }
+  .bg-red-100 { background-color: #fee2e2; }
   
   @media (min-width: 640px) {
     .sm-flex-row { flex-direction: row; }

@@ -8,7 +8,7 @@
   import { 
     ShoppingCart, Plus, Minus, X, CreditCard, LogOut, 
     // @ts-ignore
-    Package, Receipt, Search, AlertTriangle
+    Package, Receipt, Search, AlertTriangle, CheckCircle
   } from 'lucide-svelte';
 
   // State
@@ -23,6 +23,9 @@
   let processing = false;
   // @ts-ignore
   let unsubscribe;
+  let showSuccessModal = false;
+  let lastOrderNumber = '';
+  let lastOrderTotal = 0; // Store the total before clearing cart
 
   // Categories
   const categories = [
@@ -79,7 +82,7 @@
     const existingItem = cart.find(item => item.id === product.id);
     if (existingItem) {
       if (existingItem.quantity >= product.stock) {
-        showToast(`Only ${product.stock} available`, 'warning');
+        showNotification(`Only ${product.stock} available`, 'warning');
         return;
       }
       existingItem.quantity += 1;
@@ -90,7 +93,8 @@
       cart = [...cart, { ...product, quantity: 1 }];
     }
     
-    showToast(`Added ${product.name}`, 'success');
+    // Quick flash notification
+    showNotification(`Added ${product.name}`, 'success', 1000);
   }
 
   // @ts-ignore
@@ -112,7 +116,7 @@
       // @ts-ignore
       cart = [...cart];
     } else {
-      showToast(`Only ${product.stock} available`, 'warning');
+      showNotification(`Only ${product.stock} available`, 'warning');
     }
   }
 
@@ -127,14 +131,17 @@
     
     processing = true;
     try {
+      lastOrderNumber = `ORD-${Date.now().toString().slice(-6)}`;
+      lastOrderTotal = cartGrandTotal; // Store total before clearing cart
+      
       const orderData = {
-        orderNumber: `ORD-${Date.now().toString().slice(-6)}`,
+        orderNumber: lastOrderNumber,
         subtotal: cartTotal,
         tax: cartTax,
         total: cartGrandTotal,
         itemCount: cartItemsCount,
         // @ts-ignore
-        cashier: $user.email,
+        cashier: $user?.email || 'Unknown',
         paymentMethod: 'cash',
         status: 'completed'
       };
@@ -142,33 +149,69 @@
       // @ts-ignore
       await ordersService.create(orderData, cart);
       
-      showToast('Order completed successfully!', 'success');
+      // Show success modal instead of toast
+      showSuccessModal = true;
       cart = [];
       showCart = false;
+      
+      // Auto close modal after 3 seconds
+      setTimeout(() => {
+        showSuccessModal = false;
+      }, 3000);
+      
     } catch (error) {
       console.error('Error processing order:', error);
-      showToast('Failed to process order', 'error');
+      showNotification('Failed to process order. Please try again.', 'error');
     } finally {
       processing = false;
     }
   }
 
+  // Improved notification system with auto-cleanup
   // @ts-ignore
-  function showToast(message, type = 'info') {
-    const container = document.getElementById('toast-container') || createToastContainer();
+  let notificationTimer;
+  // @ts-ignore
+  function showNotification(message, type = 'info', duration = 2000) {
+    // Clear any existing notification timer
+    // @ts-ignore
+    if (notificationTimer) {
+      clearTimeout(notificationTimer);
+    }
+    
+    // Remove all existing toasts
+    const container = document.getElementById('toast-container');
+    if (container) {
+      container.innerHTML = '';
+    }
+    
+    const newContainer = container || createToastContainer();
     const toast = document.createElement('div');
     toast.className = `toast ${type}`;
+    
+    let icon = '';
+    if (type === 'success') icon = '✓';
+    else if (type === 'error') icon = '✗';
+    else if (type === 'warning') icon = '⚠';
+    else icon = 'ℹ';
+    
     toast.innerHTML = `
       <div class="flex items-center gap-2">
+        <span class="text-lg">${icon}</span>
         <span>${message}</span>
       </div>
     `;
     
-    container.appendChild(toast);
-    setTimeout(() => {
+    newContainer.appendChild(toast);
+    
+    // Auto remove after duration
+    notificationTimer = setTimeout(() => {
       toast.style.animation = 'toast-slide-out 0.3s ease forwards';
-      setTimeout(() => toast.remove(), 300);
-    }, 3000);
+      setTimeout(() => {
+        if (toast.parentNode) {
+          toast.remove();
+        }
+      }, 300);
+    }, duration);
   }
 
   function createToastContainer() {
@@ -270,17 +313,27 @@
             on:click={() => addToCart(product)}
             disabled={product.stock <= 0}
           >
+            <!-- Stock Badge - Always visible -->
             <div class="product-stock">
               {#if product.stock <= 0}
                 <span class="badge badge-danger">Out</span>
               {:else if product.stock <= product.minStock}
-                <span class="badge badge-warning">{product.stock}</span>
+                <span class="badge badge-warning">{product.stock} left</span>
+              {:else}
+                <span class="badge badge-success">{product.stock} in stock</span>
               {/if}
             </div>
             
             <div class="product-emoji">{product.image}</div>
             <div class="product-name">{product.name}</div>
             <div class="product-price">${product.price.toFixed(2)}</div>
+            
+            <!-- Add to cart indicator -->
+            {#if product.stock > 0}
+              <div class="product-add-indicator">
+                <Plus size={16} />
+              </div>
+            {/if}
           </button>
         {/each}
       </div>
@@ -396,7 +449,6 @@
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="modal-overlay lg-hidden" on:click={() => showCart = false}>
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="modal-content" on:click|stopPropagation>
       <div class="cart">
         <div class="cart-header">
@@ -493,7 +545,80 @@
   </div>
 {/if}
 
+<!-- Success Modal -->
+{#if showSuccessModal}
+  <div class="modal-overlay">
+    <div class="modal-content success-modal">
+      <div class="success-icon">
+        <CheckCircle size={64} class="text-success" />
+      </div>
+      <h2 class="text-2xl font-bold text-center mb-2">Order Successful!</h2>
+      <p class="text-center text-gray mb-4">Order #{lastOrderNumber}</p>
+      <div class="text-center">
+        <p class="text-3xl font-bold text-success">${lastOrderTotal.toFixed(2)}</p>
+        <p class="text-sm text-gray mt-1">Payment received</p>
+      </div>
+    </div>
+  </div>
+{/if}
+
 <style>
   .w-full { width: 100%; }
   .flex-wrap { flex-wrap: wrap; }
+  .-translate-y-1\/2 { transform: translateY(-50%); }
+  
+  /* Product card improvements */
+  .product-card {
+    position: relative;
+    transition: all 0.2s ease;
+  }
+  
+  .product-add-indicator {
+    position: absolute;
+    bottom: 0.5rem;
+    right: 0.5rem;
+    width: 24px;
+    height: 24px;
+    background: var(--primary);
+    color: white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transform: scale(0.8);
+    transition: all 0.2s ease;
+  }
+  
+  .product-card:hover .product-add-indicator {
+    opacity: 1;
+    transform: scale(1);
+  }
+  
+  /* Success modal */
+  .success-modal {
+    max-width: 300px;
+    text-align: center;
+    padding: 2rem;
+    animation: success-bounce 0.5s ease;
+  }
+  
+  .success-icon {
+    margin: 0 auto 1rem;
+    animation: success-scale 0.5s ease;
+  }
+  
+  @keyframes success-bounce {
+    0% { transform: scale(0.9); opacity: 0; }
+    50% { transform: scale(1.05); }
+    100% { transform: scale(1); opacity: 1; }
+  }
+  
+  @keyframes success-scale {
+    0% { transform: scale(0); }
+    50% { transform: scale(1.2); }
+    100% { transform: scale(1); }
+  }
+  
+  .text-success { color: var(--success); }
 </style>

@@ -297,8 +297,16 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .product-card.low-stock {
-  border-color: var(--warning);
   background: #fffbeb;
+}
+
+.product-card.low-stock::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border: 2px solid var(--warning);
+  border-radius: var(--radius-lg);
+  pointer-events: none;
 }
 
 .product-emoji {
