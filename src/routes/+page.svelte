@@ -8,7 +8,7 @@
   import { 
     ShoppingCart, Plus, Minus, X, CreditCard, LogOut, 
     // @ts-ignore
-    Package, Receipt, Search, AlertTriangle, CheckCircle
+    Package, Receipt, Search, AlertTriangle, CheckCircle, Trash2
   } from 'lucide-svelte';
 
   // State
@@ -25,7 +25,8 @@
   let unsubscribe;
   let showSuccessModal = false;
   let lastOrderNumber = '';
-  let lastOrderTotal = 0; // Store the total before clearing cart
+  let lastOrderTotal = 0;
+  let selectedPaymentMethod = 'cash'; // Add payment method state
 
   // Categories
   const categories = [
@@ -142,7 +143,7 @@
         itemCount: cartItemsCount,
         // @ts-ignore
         cashier: $user?.email || 'Unknown',
-        paymentMethod: 'cash',
+        paymentMethod: selectedPaymentMethod, // Use selected payment method
         status: 'completed'
       };
 
@@ -343,9 +344,20 @@
   <!-- Desktop Cart -->
   <div class="cart lg-block hidden">
     <div class="cart-header">
-      <h2 class="text-lg font-bold">Cart</h2>
+      <div>
+        <h2 class="text-lg font-bold">Cart</h2>
+        {#if cart.length > 0}
+          <p class="text-sm text-gray">{cartItemsCount} items • ${cartGrandTotal.toFixed(2)}</p>
+        {/if}
+      </div>
       {#if cart.length > 0}
-        <span class="badge badge-info">{cartItemsCount} items</span>
+        <button 
+          class="btn btn-sm btn-ghost text-danger"
+          on:click={() => cart = []}
+          title="Clear cart"
+        >
+          <Trash2 size={16} />
+        </button>
       {/if}
     </div>
 
@@ -353,13 +365,14 @@
       <div class="empty-state">
         <div class="empty-state-icon">🛒</div>
         <p class="empty-state-text">Your cart is empty</p>
+        <p class="text-xs text-gray mt-1">Add items to get started</p>
       </div>
     {:else}
       <div class="cart-items">
         {#each cart as item}
           <div class="cart-item">
             <div class="cart-item-info">
-              <div class="cart-item-name">{item.name}</div>
+              <div class="cart-item-name" title={item.name}>{item.name}</div>
               <div class="cart-item-price">${item.price.toFixed(2)} each</div>
             </div>
             
@@ -368,14 +381,14 @@
                 class="btn btn-sm btn-icon btn-ghost"
                 on:click={() => updateQuantity(item.id, -1)}
               >
-                <Minus size={16} />
+                <Minus size={14} />
               </button>
-              <span class="font-bold">{item.quantity}</span>
+              <span class="font-bold" style="min-width: 20px; text-align: center;">{item.quantity}</span>
               <button 
                 class="btn btn-sm btn-icon btn-ghost"
                 on:click={() => updateQuantity(item.id, 1)}
               >
-                <Plus size={16} />
+                <Plus size={14} />
               </button>
             </div>
             
@@ -386,8 +399,9 @@
             <button 
               class="btn btn-sm btn-icon btn-ghost text-danger"
               on:click={() => removeFromCart(item.id)}
+              title="Remove item"
             >
-              <X size={16} />
+              <X size={14} />
             </button>
           </div>
         {/each}
@@ -408,6 +422,27 @@
           <div class="cart-summary-row cart-summary-total">
             <span>Total</span>
             <span>${cartGrandTotal.toFixed(2)}</span>
+          </div>
+        </div>
+        
+        <!-- Payment Method Selection -->
+        <div class="payment-methods">
+          <p class="text-sm font-medium text-gray mb-2">Payment Method</p>
+          <div class="flex gap-2">
+            <button
+              class="payment-method-btn {selectedPaymentMethod === 'cash' ? 'active' : ''}"
+              on:click={() => selectedPaymentMethod = 'cash'}
+            >
+              <span>💵</span>
+              <span>Cash</span>
+            </button>
+            <button
+              class="payment-method-btn {selectedPaymentMethod === 'card' ? 'active' : ''}"
+              on:click={() => selectedPaymentMethod = 'card'}
+            >
+              <span>💳</span>
+              <span>Card</span>
+            </button>
           </div>
         </div>
         
@@ -462,13 +497,14 @@
           <div class="empty-state">
             <div class="empty-state-icon">🛒</div>
             <p class="empty-state-text">Your cart is empty</p>
+            <p class="text-xs text-gray mt-1">Add items to get started</p>
           </div>
         {:else}
           <div class="cart-items">
             {#each cart as item}
               <div class="cart-item">
                 <div class="cart-item-info">
-                  <div class="cart-item-name">{item.name}</div>
+                  <div class="cart-item-name" title={item.name}>{item.name}</div>
                   <div class="cart-item-price">${item.price.toFixed(2)} each</div>
                 </div>
                 
@@ -477,14 +513,14 @@
                     class="btn btn-sm btn-icon btn-ghost"
                     on:click={() => updateQuantity(item.id, -1)}
                   >
-                    <Minus size={16} />
+                    <Minus size={14} />
                   </button>
-                  <span class="font-bold">{item.quantity}</span>
+                  <span class="font-bold" style="min-width: 20px; text-align: center;">{item.quantity}</span>
                   <button 
                     class="btn btn-sm btn-icon btn-ghost"
                     on:click={() => updateQuantity(item.id, 1)}
                   >
-                    <Plus size={16} />
+                    <Plus size={14} />
                   </button>
                 </div>
                 
@@ -495,8 +531,9 @@
                 <button 
                   class="btn btn-sm btn-icon btn-ghost text-danger"
                   on:click={() => removeFromCart(item.id)}
+                  title="Remove item"
                 >
-                  <X size={16} />
+                  <X size={14} />
                 </button>
               </div>
             {/each}
@@ -517,6 +554,27 @@
               <div class="cart-summary-row cart-summary-total">
                 <span>Total</span>
                 <span>${cartGrandTotal.toFixed(2)}</span>
+              </div>
+            </div>
+            
+            <!-- Payment Method Selection -->
+            <div class="payment-methods">
+              <p class="text-sm font-medium text-gray mb-2">Payment Method</p>
+              <div class="flex gap-2">
+                <button
+                  class="payment-method-btn {selectedPaymentMethod === 'cash' ? 'active' : ''}"
+                  on:click={() => selectedPaymentMethod = 'cash'}
+                >
+                  <span>💵</span>
+                  <span>Cash</span>
+                </button>
+                <button
+                  class="payment-method-btn {selectedPaymentMethod === 'card' ? 'active' : ''}"
+                  on:click={() => selectedPaymentMethod = 'card'}
+                >
+                  <span>💳</span>
+                  <span>Card</span>
+                </button>
               </div>
             </div>
             
@@ -593,6 +651,43 @@
   .product-card:hover .product-add-indicator {
     opacity: 1;
     transform: scale(1);
+  }
+  
+  /* Payment method buttons */
+  .payment-methods {
+    margin: 1rem 0;
+    padding: 1rem 0;
+    border-top: 1px solid var(--gray-200);
+  }
+  
+  .payment-method-btn {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.75rem;
+    border: 2px solid var(--gray-300);
+    border-radius: var(--radius-md);
+    background: white;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+  
+  .payment-method-btn:hover {
+    background: var(--gray-50);
+    border-color: var(--primary);
+  }
+  
+  .payment-method-btn.active {
+    background: var(--primary-light);
+    border-color: var(--primary);
+    color: var(--primary-dark);
+    font-weight: 600;
+  }
+  
+  .payment-method-btn span:first-child {
+    font-size: 1.25rem;
   }
   
   /* Success modal */
