@@ -19,13 +19,21 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase.js';
 
+// Check if db is initialized
+function checkDb() {
+  if (!db) {
+    console.error('Firestore database not initialized');
+    throw new Error('Database not initialized. Check your Firebase configuration.');
+  }
+}
+
 // ==================== PRODUCTS ====================
 
 export const productsService = {
   // Get all products
   async getAll() {
     try {
-      // @ts-ignore
+      checkDb();
       const q = query(collection(db, 'products'), orderBy('name'));
       const snapshot = await getDocs(q);
       return snapshot.docs.map(doc => ({
@@ -39,11 +47,10 @@ export const productsService = {
   },
 
   // Get products by category
-  // @ts-ignore
   async getByCategory(category) {
     try {
+      checkDb();
       const q = query(
-        // @ts-ignore
         collection(db, 'products'), 
         where('category', '==', category),
         orderBy('name')
@@ -62,8 +69,8 @@ export const productsService = {
   // Get low stock products
   async getLowStock() {
     try {
+      checkDb();
       const q = query(
-        // @ts-ignore
         collection(db, 'products'),
         where('stock', '<=', 'minStock'),
         orderBy('stock')
@@ -80,10 +87,9 @@ export const productsService = {
   },
 
   // Add new product
-  // @ts-ignore
   async add(product) {
     try {
-      // @ts-ignore
+      checkDb();
       const docRef = await addDoc(collection(db, 'products'), {
         ...product,
         createdAt: serverTimestamp(),
@@ -97,10 +103,9 @@ export const productsService = {
   },
 
   // Update product
-  // @ts-ignore
   async update(id, updates) {
     try {
-      // @ts-ignore
+      checkDb();
       const docRef = doc(db, 'products', id);
       await updateDoc(docRef, {
         ...updates,
@@ -113,10 +118,9 @@ export const productsService = {
   },
 
   // Delete product
-  // @ts-ignore
   async delete(id) {
     try {
-      // @ts-ignore
+      checkDb();
       await deleteDoc(doc(db, 'products', id));
     } catch (error) {
       console.error('Error deleting product:', error);
@@ -125,17 +129,22 @@ export const productsService = {
   },
 
   // Listen to products changes (real-time)
-  // @ts-ignore
   listen(callback) {
-    // @ts-ignore
+    checkDb();
     const q = query(collection(db, 'products'), orderBy('name'));
-    return onSnapshot(q, (snapshot) => {
-      const products = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-      callback(products);
-    });
+    return onSnapshot(q, 
+      (snapshot) => {
+        const products = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+        callback(products);
+      },
+      (error) => {
+        console.error('Error in products listener:', error);
+        callback([]);
+      }
+    );
   }
 };
 
@@ -143,17 +152,44 @@ export const productsService = {
 
 export const ordersService = {
   // Create new order with transaction
-  // @ts-ignore
   async create(orderData, cartItems) {
     try {
-      // @ts-ignore
+      checkDb();
+      
+      console.log('Creating order with data:', orderData);
+      console.log('Cart items:', cartItems);
+      
       const result = await runTransaction(db, async (transaction) => {
+        // PHASE 1: ALL READS FIRST
+        const productDocs = [];
+        
+        // Read all products first
+        for (const item of cartItems) {
+          const productRef = doc(db, 'products', item.id);
+          const productDoc = await transaction.get(productRef);
+          
+          if (!productDoc.exists()) {
+            throw new Error(`Product ${item.name} not found`);
+          }
+          
+          const productData = productDoc.data();
+          if (productData.stock < item.quantity) {
+            throw new Error(`Not enough stock for ${item.name}. Available: ${productData.stock}, Requested: ${item.quantity}`);
+          }
+          
+          productDocs.push({
+            ref: productRef,
+            data: productData,
+            item: item
+          });
+        }
+        
+        // PHASE 2: ALL WRITES AFTER ALL READS
+        
         // Create order document
-        // @ts-ignore
         const orderRef = doc(collection(db, 'orders'));
         const orderDoc = {
           ...orderData,
-          // @ts-ignore
           items: cartItems.map(item => ({
             productId: item.id,
             name: item.name,
@@ -165,36 +201,25 @@ export const ordersService = {
           status: 'completed'
         };
         
+        console.log('Setting order document:', orderDoc);
         transaction.set(orderRef, orderDoc);
 
-        // Update product stock
-        for (const item of cartItems) {
-          // @ts-ignore
-          const productRef = doc(db, 'products', item.id);
-          const productDoc = await transaction.get(productRef);
-          
-          if (!productDoc.exists()) {
-            throw new Error(`Product ${item.name} not found`);
-          }
-          
-          const currentStock = productDoc.data().stock;
-          if (currentStock < item.quantity) {
-            throw new Error(`Not enough stock for ${item.name}`);
-          }
-          
-          transaction.update(productRef, {
+        // Update all product stocks and create inventory logs
+        for (const { ref, data, item } of productDocs) {
+          // Update product stock
+          console.log(`Updating stock for ${item.name}: ${data.stock} -> ${data.stock - item.quantity}`);
+          transaction.update(ref, {
             stock: increment(-item.quantity),
             updatedAt: serverTimestamp()
           });
 
           // Create inventory log
-          // @ts-ignore
           const inventoryLogRef = doc(collection(db, 'inventory-logs'));
           transaction.set(inventoryLogRef, {
             productId: item.id,
             productName: item.name,
-            previousStock: currentStock,
-            newStock: currentStock - item.quantity,
+            previousStock: data.stock,
+            newStock: data.stock - item.quantity,
             changeQuantity: -item.quantity,
             changeReason: 'sale',
             orderId: orderRef.id,
@@ -205,9 +230,15 @@ export const ordersService = {
         return orderRef.id;
       });
 
+      console.log('Order created successfully with ID:', result);
       return result;
     } catch (error) {
       console.error('Error creating order:', error);
+      console.error('Error details:', {
+        code: error.code,
+        message: error.message,
+        stack: error.stack
+      });
       throw error;
     }
   },
@@ -215,8 +246,8 @@ export const ordersService = {
   // Get order history
   async getHistory(limitCount = 50) {
     try {
+      checkDb();
       const q = query(
-        // @ts-ignore
         collection(db, 'orders'),
         orderBy('createdAt', 'desc'),
         limit(limitCount)
@@ -228,16 +259,16 @@ export const ordersService = {
       }));
     } catch (error) {
       console.error('Error fetching order history:', error);
-      throw error;
+      // Return empty array instead of throwing
+      return [];
     }
   },
 
   // Get orders by date range
-  // @ts-ignore
   async getByDateRange(startDate, endDate) {
     try {
+      checkDb();
       const q = query(
-        // @ts-ignore
         collection(db, 'orders'),
         where('createdAt', '>=', startDate),
         where('createdAt', '<=', endDate),
@@ -259,12 +290,10 @@ export const ordersService = {
 
 export const inventoryService = {
   // Update stock manually
-  // @ts-ignore
   async updateStock(productId, newStock, reason = 'manual_adjustment') {
     try {
-      // @ts-ignore
+      checkDb();
       return await runTransaction(db, async (transaction) => {
-        // @ts-ignore
         const productRef = doc(db, 'products', productId);
         const productDoc = await transaction.get(productRef);
         
@@ -282,7 +311,6 @@ export const inventoryService = {
         });
 
         // Create inventory log
-        // @ts-ignore
         const inventoryLogRef = doc(collection(db, 'inventory-logs'));
         transaction.set(inventoryLogRef, {
           productId,
@@ -305,8 +333,8 @@ export const inventoryService = {
   // Get inventory logs
   async getLogs(limitCount = 100) {
     try {
+      checkDb();
       const q = query(
-        // @ts-ignore
         collection(db, 'inventory-logs'),
         orderBy('createdAt', 'desc'),
         limit(limitCount)
@@ -318,19 +346,18 @@ export const inventoryService = {
       }));
     } catch (error) {
       console.error('Error fetching inventory logs:', error);
-      throw error;
+      // Return empty array instead of throwing
+      return [];
     }
   },
 
   // Bulk update stock
-  // @ts-ignore
   async bulkUpdateStock(updates) {
     try {
-      // @ts-ignore
+      checkDb();
       const batch = writeBatch(db);
       
       for (const update of updates) {
-        // @ts-ignore
         const productRef = doc(db, 'products', update.productId);
         batch.update(productRef, {
           stock: update.newStock,
@@ -338,7 +365,6 @@ export const inventoryService = {
         });
 
         // Add inventory log
-        // @ts-ignore
         const inventoryLogRef = doc(collection(db, 'inventory-logs'));
         batch.set(inventoryLogRef, {
           productId: update.productId,
@@ -365,7 +391,7 @@ export const categoriesService = {
   // Get all categories
   async getAll() {
     try {
-      // @ts-ignore
+      checkDb();
       const q = query(collection(db, 'categories'), orderBy('name'));
       const snapshot = await getDocs(q);
       return snapshot.docs.map(doc => ({
@@ -379,10 +405,9 @@ export const categoriesService = {
   },
 
   // Add new category
-  // @ts-ignore
   async add(category) {
     try {
-      // @ts-ignore
+      checkDb();
       const docRef = await addDoc(collection(db, 'categories'), {
         ...category,
         createdAt: serverTimestamp()

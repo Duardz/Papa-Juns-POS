@@ -1,6 +1,7 @@
+// lib/firebase.js
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
 import { getAnalytics } from 'firebase/analytics';
 import { browser } from '$app/environment';
 
@@ -16,9 +17,45 @@ const firebaseConfig = {
 };
 
 // Initialize Firebase
-export const app = initializeApp(firebaseConfig);
+let app = null;
+let auth = null;
+let db = null;
+let analytics = null;
 
-// Initialize services only in browser environment
-export const auth = browser ? getAuth(app) : null;
-export const db = browser ? getFirestore(app) : null;
-export const analytics = browser && firebaseConfig.measurementId ? getAnalytics(app) : null;
+if (browser) {
+  try {
+    // Log config to debug (remove in production)
+    console.log('Firebase config:', {
+      ...firebaseConfig,
+      apiKey: firebaseConfig.apiKey ? 'SET' : 'MISSING',
+      authDomain: firebaseConfig.authDomain ? 'SET' : 'MISSING',
+      projectId: firebaseConfig.projectId ? 'SET' : 'MISSING'
+    });
+
+    app = initializeApp(firebaseConfig);
+    auth = getAuth(app);
+    db = getFirestore(app);
+    
+    if (firebaseConfig.measurementId) {
+      analytics = getAnalytics(app);
+    }
+
+    // Debug log
+    console.log('Firebase initialized:', {
+      app: app ? 'YES' : 'NO',
+      auth: auth ? 'YES' : 'NO',
+      db: db ? 'YES' : 'NO'
+    });
+
+    // Optional: Connect to Firestore emulator in development
+    if (import.meta.env.DEV && import.meta.env.VITE_USE_EMULATOR === 'true') {
+      connectFirestoreEmulator(db, 'localhost', 8080);
+      console.log('Connected to Firestore emulator');
+    }
+
+  } catch (error) {
+    console.error('Error initializing Firebase:', error);
+  }
+}
+
+export { app, auth, db, analytics };

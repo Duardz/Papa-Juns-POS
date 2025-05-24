@@ -1,68 +1,46 @@
-<!-- inventory page -->
 <script>
 // @ts-nocheck
 
   import { onMount, onDestroy } from 'svelte';
   import { user } from '$lib/stores/auth.js';
   import { goto } from '$app/navigation';
-  import { productsService, inventoryService } from '$lib/services/firestore.js';
+  import { productsService } from '$lib/services/firestore.js';
   import { 
-    Package,
-    Plus,
-    Edit3,
-    Trash2,
-    Save,
-    X,
-    AlertTriangle,
-    Search,
+    Package, Plus, Edit3, Trash2, Save, X, AlertTriangle, 
     // @ts-ignore
-    Filter,
-    // @ts-ignore
-    Download,
-    // @ts-ignore
-    Upload,
-    History,
-    TrendingUp,
-    TrendingDown,
-    Loader2,
-    // @ts-ignore
-    ChefHat,
-    ArrowLeft
+    Search, ArrowLeft, TrendingDown
   } from 'lucide-svelte';
 
   // State
   // @ts-ignore
   let products = [];
-  // @ts-ignore
-  let inventoryLogs = [];
   let loading = true;
-  // @ts-ignore
-  let error = null;
   let searchQuery = '';
   let selectedCategory = 'all';
-  let showAddProduct = false;
   // @ts-ignore
-  let editingProduct = null;
-  let showBulkUpdate = false;
-  let showInventoryLogs = false;
+  let editingId = null;
+  let editForm = {};
+  let showAddModal = false;
   // @ts-ignore
   let unsubscribe;
 
-  // Form data
+  // New product form
   let newProduct = {
     name: '',
     category: 'chicken',
-    price: 0,
-    stock: 0,
-    minStock: 5,
+    price: '',
+    stock: '',
+    minStock: '5',
     image: '🍗'
   };
 
-  // Bulk update
-  // @ts-ignore
-  let bulkUpdates = [];
+  const categories = [
+    { id: 'chicken', name: 'Chicken', emoji: '🍗' },
+    { id: 'fries', name: 'Fries', emoji: '🍟' },
+    { id: 'drinks', name: 'Drinks', emoji: '🥤' }
+  ];
 
-  // Reactive calculations
+  // Computed
  // @ts-ignore
    $: filteredProducts = products.filter(p => {
     const matchesCategory = selectedCategory === 'all' || p.category === selectedCategory;
@@ -71,79 +49,94 @@
   });
   
  // @ts-ignore
-   $: lowStockItems = products.filter(p => p.stock <= p.minStock && p.stock > 0);
+   $: lowStockCount = products.filter(p => p.stock <= p.minStock && p.stock > 0).length;
  // @ts-ignore
-   $: outOfStockItems = products.filter(p => p.stock <= 0);
-  $: totalProducts = products.length;
+   $: outOfStockCount = products.filter(p => p.stock <= 0).length;
  // @ts-ignore
    $: totalValue = products.reduce((sum, p) => sum + (p.price * p.stock), 0);
-
-  // Categories with emojis
-  const categories = [
-    { value: 'chicken', label: 'Chicken', emoji: '🍗' },
-    { value: 'fries', label: 'Fries', emoji: '🍟' },
-    { value: 'drinks', label: 'Drinks', emoji: '🥤' },
-    { value: 'sides', label: 'Sides', emoji: '🥗' }
-  ];
-
-  const categoryEmojis = {
-    chicken: '🍗',
-    fries: '🍟',
-    drinks: '🥤',
-    sides: '🥗'
-  };
 
   onMount(async () => {
     if (!$user) {
       goto('/auth/login');
       return;
     }
-    await loadData();
+
+    try {
+      loading = true;
+      // @ts-ignore
+      unsubscribe = productsService.listen((updatedProducts) => {
+        products = updatedProducts;
+        loading = false;
+      });
+    } catch (error) {
+      console.error('Error loading products:', error);
+      loading = false;
+    }
   });
 
   onDestroy(() => {
     // @ts-ignore
-    if (unsubscribe) {
-      unsubscribe();
-    }
+    if (unsubscribe) unsubscribe();
   });
 
-  async function loadData() {
+  // @ts-ignore
+  function startEdit(product) {
+    editingId = product.id;
+    editForm = { ...product };
+  }
+
+  function cancelEdit() {
+    editingId = null;
+    editForm = {};
+  }
+
+  async function saveEdit() {
     try {
-      loading = true;
-      error = null;
-
-      // Load products with real-time updates
       // @ts-ignore
-      unsubscribe = productsService.listen((updatedProducts) => {
-        products = updatedProducts;
+      await productsService.update(editingId, {
+        // @ts-ignore
+        name: editForm.name,
+        // @ts-ignore
+        category: editForm.category,
+        // @ts-ignore
+        price: parseFloat(editForm.price),
+        // @ts-ignore
+        stock: parseInt(editForm.stock),
+        // @ts-ignore
+        minStock: parseInt(editForm.minStock)
       });
+      editingId = null;
+      showToast('Product updated successfully', 'success');
+    } catch (error) {
+      console.error('Error updating product:', error);
+      showToast('Failed to update product', 'error');
+    }
+  }
 
-      // Load inventory logs
-      inventoryLogs = await inventoryService.getLogs(50);
-
-    } catch (err) {
-      console.error('Error loading data:', err);
-      error = 'Failed to load inventory data. Please try again.';
-    } finally {
-      loading = false;
+  // @ts-ignore
+  async function deleteProduct(id, name) {
+    if (!confirm(`Delete "${name}"?`)) return;
+    
+    try {
+      await productsService.delete(id);
+      showToast('Product deleted successfully', 'success');
+    } catch (error) {
+      console.error('Error deleting product:', error);
+      showToast('Failed to delete product', 'error');
     }
   }
 
   async function addProduct() {
-    try {
-      if (!newProduct.name.trim()) {
-        showNotification('Product name is required', 'error');
-        return;
-      }
+    if (!newProduct.name.trim()) {
+      showToast('Product name is required', 'error');
+      return;
+    }
 
+    try {
       await productsService.add({
         ...newProduct,
-        // @ts-ignore
         price: parseFloat(newProduct.price),
-        // @ts-ignore
         stock: parseInt(newProduct.stock),
-        // @ts-ignore
         minStock: parseInt(newProduct.minStock)
       });
 
@@ -151,706 +144,394 @@
       newProduct = {
         name: '',
         category: 'chicken',
-        price: 0,
-        stock: 0,
-        minStock: 5,
-        image: categoryEmojis.chicken
+        price: '',
+        stock: '',
+        minStock: '5',
+        image: '🍗'
       };
-
-      showAddProduct = false;
-      showNotification('Product added successfully!', 'success');
-    } catch (err) {
-      console.error('Error adding product:', err);
-      showNotification('Failed to add product. Please try again.', 'error');
-    }
-  }
-
-  // @ts-ignore
-  async function updateProduct(id, updates) {
-    try {
-      await productsService.update(id, {
-        ...updates,
-        price: parseFloat(updates.price),
-        stock: parseInt(updates.stock),
-        minStock: parseInt(updates.minStock)
-      });
-
-      editingProduct = null;
-      showNotification('Product updated successfully!', 'success');
-    } catch (err) {
-      console.error('Error updating product:', err);
-      showNotification('Failed to update product. Please try again.', 'error');
-    }
-  }
-
-  // @ts-ignore
-  async function deleteProduct(id, name) {
-    if (!confirm(`Are you sure you want to delete "${name}"?`)) {
-      return;
-    }
-
-    try {
-      await productsService.delete(id);
-      showNotification('Product deleted successfully!', 'success');
-    } catch (err) {
-      console.error('Error deleting product:', err);
-      showNotification('Failed to delete product. Please try again.', 'error');
-    }
-  }
-
-  // @ts-ignore
-  async function updateStock(productId, newStock, reason = 'manual_adjustment') {
-    try {
-      await inventoryService.updateStock(productId, parseInt(newStock), reason);
-      showNotification('Stock updated successfully!', 'success');
       
-      // Refresh inventory logs
-      inventoryLogs = await inventoryService.getLogs(50);
-    } catch (err) {
-      console.error('Error updating stock:', err);
-      showNotification('Failed to update stock. Please try again.', 'error');
+      showAddModal = false;
+      showToast('Product added successfully', 'success');
+    } catch (error) {
+      console.error('Error adding product:', error);
+      showToast('Failed to add product', 'error');
     }
   }
 
-  function startBulkUpdate() {
-    // @ts-ignore
-    bulkUpdates = products.map(p => ({
-      productId: p.id,
-      productName: p.name,
-      currentStock: p.stock,
-      newStock: p.stock,
-      previousStock: p.stock
-    }));
-    showBulkUpdate = true;
-  }
-
-  async function processBulkUpdate() {
-    try {
-      // @ts-ignore
-      const updates = bulkUpdates.filter(u => u.newStock !== u.currentStock);
-      
-      if (updates.length === 0) {
-        showNotification('No changes to update', 'info');
-        return;
-      }
-
-      await inventoryService.bulkUpdateStock(updates.map(u => ({
-        ...u,
-        reason: 'bulk_update'
-      })));
-
-      showBulkUpdate = false;
-      showNotification(`Updated ${updates.length} products successfully!`, 'success');
-      
-      // Refresh inventory logs
-      inventoryLogs = await inventoryService.getLogs(50);
-    } catch (err) {
-      console.error('Error processing bulk update:', err);
-      showNotification('Failed to process bulk update. Please try again.', 'error');
-    }
+  function updateProductEmoji() {
+    const category = categories.find(c => c.id === newProduct.category);
+    newProduct.image = category?.emoji || '🍽️';
   }
 
   // @ts-ignore
-  function showNotification(message, type = 'info') {
-    console.log(`${type.toUpperCase()}: ${message}`);
+  function showToast(message, type = 'info') {
+    const container = document.getElementById('toast-container') || createToastContainer();
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    toast.innerHTML = `<div class="flex items-center gap-2"><span>${message}</span></div>`;
     
-    const notification = document.createElement('div');
-    notification.className = `fixed top-4 right-4 z-50 p-4 rounded-lg shadow-lg text-white max-w-sm ${
-      type === 'success' ? 'bg-green-500' :
-      type === 'error' ? 'bg-red-500' :
-      type === 'warning' ? 'bg-yellow-500' :
-      'bg-blue-500'
-    }`;
-    notification.textContent = message;
-    document.body.appendChild(notification);
-    
+    container.appendChild(toast);
     setTimeout(() => {
-      notification.remove();
+      toast.style.animation = 'toast-slide-out 0.3s ease forwards';
+      setTimeout(() => toast.remove(), 300);
     }, 3000);
   }
 
-  // @ts-ignore
-  function formatCurrency(amount) {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD'
-    }).format(amount);
-  }
-
-  // @ts-ignore
-  function formatDate(timestamp) {
-    if (!timestamp) return 'N/A';
-    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-    return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
-  }
-
-  // @ts-ignore
-  function onCategoryChange(category) {
-    // @ts-ignore
-    newProduct.image = categoryEmojis[category] || '🍽️';
+  function createToastContainer() {
+    const container = document.createElement('div');
+    container.id = 'toast-container';
+    document.body.appendChild(container);
+    return container;
   }
 </script>
 
 <svelte:head>
-  <title>Inventory Management - Papa Jun's</title>
+  <title>Inventory - Papa Jun's</title>
 </svelte:head>
 
-{#if $user}
-<div class="min-h-screen bg-gray-50">
-  <!-- Header -->
-  <header class="bg-white border-b border-gray-200 shadow-sm">
-    <div class="px-4 sm:px-6 lg:px-8">
-      <div class="flex items-center justify-between h-16">
-        <!-- Logo & Navigation -->
-        <div class="flex items-center space-x-4">
-          <a href="/" class="flex items-center space-x-2 text-gray-600 hover:text-orange-600 transition-colors">
-            <ArrowLeft class="w-5 h-5" />
-            <span class="font-medium">Back to POS</span>
-          </a>
-          
-          <div class="w-px h-6 bg-gray-300"></div>
-          
-          <div class="flex items-center space-x-3">
-            <div class="w-8 h-8 bg-gradient-to-r from-orange-500 to-red-500 rounded-lg flex items-center justify-center">
-              <Package class="w-5 h-5 text-white" />
-            </div>
-            <div>
-              <h1 class="text-xl font-bold text-gray-900">Inventory Management</h1>
-              <p class="text-sm text-gray-600">Manage your products and stock</p>
-            </div>
-          </div>
+<!-- Header -->
+<header class="header">
+  <div class="header-content">
+    <div class="flex items-center gap-3">
+      <a href="/" class="btn btn-ghost">
+        <ArrowLeft size={18} />
+        <span class="hidden sm-block">Back to POS</span>
+      </a>
+      <div class="logo">
+        <div class="logo-icon">
+          <Package size={20} />
         </div>
+        <span>Inventory</span>
+      </div>
+    </div>
+    
+    <button class="btn btn-primary" on:click={() => showAddModal = true}>
+      <Plus size={18} />
+      <span class="hidden sm-block">Add Product</span>
+    </button>
+  </div>
+</header>
 
-        <!-- Action Buttons -->
-        <div class="flex items-center space-x-3">
+<div class="container" style="padding-top: 2rem; padding-bottom: 2rem;">
+  <!-- Stats Cards -->
+  <div class="grid grid-cols-2 lg-grid-cols-4 gap-4 mb-4">
+    <div class="card">
+      <div class="card-body">
+        <div class="text-2xl font-bold">{products.length}</div>
+        <div class="text-sm text-gray">Total Products</div>
+      </div>
+    </div>
+    
+    <div class="card">
+      <div class="card-body">
+        <div class="text-2xl font-bold text-success">${totalValue.toFixed(2)}</div>
+        <div class="text-sm text-gray">Total Value</div>
+      </div>
+    </div>
+    
+    <div class="card">
+      <div class="card-body">
+        <div class="text-2xl font-bold text-warning">{lowStockCount}</div>
+        <div class="text-sm text-gray">Low Stock</div>
+      </div>
+    </div>
+    
+    <div class="card">
+      <div class="card-body">
+        <div class="text-2xl font-bold text-danger">{outOfStockCount}</div>
+        <div class="text-sm text-gray">Out of Stock</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Alerts -->
+  {#if outOfStockCount > 0}
+    <div class="alert alert-danger mb-4">
+      <AlertTriangle size={20} />
+      <span>{outOfStockCount} products are out of stock</span>
+    </div>
+  {/if}
+
+  <!-- Search & Filters -->
+  <div class="card mb-4">
+    <div class="card-body">
+      <div class="flex flex-col gap-3">
+        <div class="relative">
+          <Search class="absolute left-3 top-1/2 -translate-y-1/2 text-gray" size={18} />
+          <input
+            type="text"
+            placeholder="Search products..."
+            bind:value={searchQuery}
+            class="input"
+            style="padding-left: 2.5rem;"
+          />
+        </div>
+        
+        <div class="flex gap-2 flex-wrap">
           <button
-            class="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-            on:click={() => showInventoryLogs = true}
+            class="btn btn-sm {selectedCategory === 'all' ? 'btn-primary' : 'btn-secondary'}"
+            on:click={() => selectedCategory = 'all'}
           >
-            <History class="w-4 h-4" />
-            <span class="hidden sm:inline">Logs</span>
+            <span>🍽️</span>
+            <span>All</span>
           </button>
-          
-          <button
-            class="flex items-center space-x-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
-            on:click={startBulkUpdate}
-          >
-            <Edit3 class="w-4 h-4" />
-            <span class="hidden sm:inline">Bulk Update</span>
-          </button>
-          
-          <button
-            class="flex items-center space-x-2 px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors"
-            on:click={() => showAddProduct = true}
-          >
-            <Plus class="w-4 h-4" />
-            <span class="hidden sm:inline">Add Product</span>
-          </button>
+          {#each categories as category}
+            <button
+              class="btn btn-sm {selectedCategory === category.id ? 'btn-primary' : 'btn-secondary'}"
+              on:click={() => selectedCategory = category.id}
+            >
+              <span>{category.emoji}</span>
+              <span>{category.name}</span>
+            </button>
+          {/each}
         </div>
       </div>
     </div>
-  </header>
+  </div>
 
+  <!-- Products Table -->
   {#if loading}
-    <!-- Loading State -->
-    <div class="flex items-center justify-center h-64">
-      <div class="flex items-center space-x-3">
-        <Loader2 class="w-6 h-6 animate-spin text-orange-600" />
-        <span class="text-gray-600">Loading inventory...</span>
-      </div>
-    </div>
-  {:else if error}
-    <!-- Error State -->
-    <div class="p-6">
-      <div class="bg-red-50 border border-red-200 rounded-xl p-4 flex items-start space-x-3">
-        <AlertTriangle class="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
-        <div>
-          <p class="font-semibold text-red-800">Error Loading Inventory</p>
-          <p class="text-sm text-red-700">{error}</p>
-          <button 
-            class="mt-2 text-sm text-red-600 hover:text-red-800 underline"
-            on:click={loadData}
-          >
-            Try Again
-          </button>
-        </div>
+    <div class="card">
+      <div class="card-body text-center">
+        <div class="animate-spin text-primary">⏳</div>
+        <p class="text-gray mt-2">Loading inventory...</p>
       </div>
     </div>
   {:else}
-    <div class="p-4 sm:p-6 lg:p-8 space-y-6">
-      <!-- Stats Cards -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-        <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-          <div class="flex items-center justify-between">
-            <div>
-              <p class="text-sm font-medium text-gray-600">Total Products</p>
-              <p class="text-3xl font-bold text-gray-900">{totalProducts}</p>
-            </div>
-            <div class="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center">
-              <Package class="w-6 h-6 text-blue-600" />
-            </div>
-          </div>
-        </div>
-
-        <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-          <div class="flex items-center justify-between">
-            <div>
-              <p class="text-sm font-medium text-gray-600">Total Value</p>
-              <p class="text-3xl font-bold text-gray-900">{formatCurrency(totalValue)}</p>
-            </div>
-            <div class="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center">
-              <TrendingUp class="w-6 h-6 text-green-600" />
-            </div>
-          </div>
-        </div>
-
-        <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-          <div class="flex items-center justify-between">
-            <div>
-              <p class="text-sm font-medium text-gray-600">Low Stock</p>
-              <p class="text-3xl font-bold text-yellow-600">{lowStockItems.length}</p>
-            </div>
-            <div class="w-12 h-12 bg-yellow-100 rounded-xl flex items-center justify-center">
-              <AlertTriangle class="w-6 h-6 text-yellow-600" />
-            </div>
-          </div>
-        </div>
-
-        <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-          <div class="flex items-center justify-between">
-            <div>
-              <p class="text-sm font-medium text-gray-600">Out of Stock</p>
-              <p class="text-3xl font-bold text-red-600">{outOfStockItems.length}</p>
-            </div>
-            <div class="w-12 h-12 bg-red-100 rounded-xl flex items-center justify-center">
-              <TrendingDown class="w-6 h-6 text-red-600" />
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Stock Alerts -->
-      {#if lowStockItems.length > 0 || outOfStockItems.length > 0}
-        <div class="space-y-3">
-          {#if outOfStockItems.length > 0}
-            <div class="bg-red-50 border border-red-200 rounded-xl p-4 flex items-start space-x-3">
-              <AlertTriangle class="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
-              <div>
-                <p class="font-semibold text-red-800">Out of Stock Items</p>
-                <p class="text-sm text-red-700">{outOfStockItems.map(p => p.name).join(', ')}</p>
-              </div>
-            </div>
-          {/if}
-          
-          {#if lowStockItems.length > 0}
-            <div class="bg-yellow-50 border border-yellow-200 rounded-xl p-4 flex items-start space-x-3">
-              <AlertTriangle class="w-5 h-5 text-yellow-500 flex-shrink-0 mt-0.5" />
-              <div>
-                <p class="font-semibold text-yellow-800">Low Stock Alert</p>
-                <p class="text-sm text-yellow-700">{lowStockItems.map(p => `${p.name} (${p.stock} left)`).join(', ')}</p>
-              </div>
-            </div>
-          {/if}
-        </div>
-      {/if}
-
-      <!-- Search & Filter -->
-      <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-        <div class="flex flex-col sm:flex-row gap-4">
-          <!-- Search -->
-          <div class="flex-1">
-            <div class="relative">
-              <Search class="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Search products..."
-                bind:value={searchQuery}
-                class="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-colors"
-              />
-            </div>
-          </div>
-          
-          <!-- Category Filter -->
-          <div class="flex flex-wrap gap-2">
-            <button 
-              class="flex items-center space-x-2 px-4 py-2.5 rounded-lg font-medium transition-all duration-200 {selectedCategory === 'all' ? 'bg-orange-600 text-white shadow-lg' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}"
-              on:click={() => selectedCategory = 'all'}
-            >
-              <span class="text-lg">🍽️</span>
-              <span>All</span>
-            </button>
-            {#each categories as category}
-              <button 
-                class="flex items-center space-x-2 px-4 py-2.5 rounded-lg font-medium transition-all duration-200 {selectedCategory === category.value ? 'bg-orange-600 text-white shadow-lg' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}"
-                on:click={() => selectedCategory = category.value}
-              >
-                <span class="text-lg">{category.emoji}</span>
-                <span>{category.label}</span>
-              </button>
-            {/each}
-          </div>
-        </div>
-      </div>
-
-      <!-- Products Table -->
-      <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-        <div class="px-6 py-4 border-b border-gray-200">
-          <h3 class="text-lg font-semibold text-gray-900">Products</h3>
-        </div>
-        
-        <div class="overflow-x-auto">
-          <table class="min-w-full divide-y divide-gray-200">
-            <thead class="bg-gray-50">
-              <tr>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Product</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Price</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Stock</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Min Stock</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+    <div class="card">
+      <div class="overflow-x-auto">
+        <table class="w-full">
+          <thead>
+            <tr class="border-b">
+              <th class="text-left p-3">Product</th>
+              <th class="text-left p-3">Category</th>
+              <th class="text-left p-3">Price</th>
+              <th class="text-left p-3">Stock</th>
+              <th class="text-left p-3">Min Stock</th>
+              <th class="text-left p-3">Status</th>
+              <th class="text-left p-3">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each filteredProducts as product}
+              <tr class="border-b hover:bg-gray-50">
+                <td class="p-3">
+                  <div class="flex items-center gap-2">
+                    <span class="text-2xl">{product.image}</span>
+                    {#if editingId === product.id}
+                      <input
+                        type="text"
+                        bind:value={editForm.name}
+                        class="input"
+                        style="width: 150px;"
+                      />
+                    {:else}
+                      <span class="font-medium">{product.name}</span>
+                    {/if}
+                  </div>
+                </td>
+                
+                <td class="p-3">
+                  {#if editingId === product.id}
+                    <select bind:value={editForm.category} class="input" style="width: 120px;">
+                      {#each categories as cat}
+                        <option value={cat.id}>{cat.name}</option>
+                      {/each}
+                    </select>
+                  {:else}
+                    <span class="badge badge-info">{product.category}</span>
+                  {/if}
+                </td>
+                
+                <td class="p-3">
+                  {#if editingId === product.id}
+                    <input
+                      type="number"
+                      step="0.01"
+                      bind:value={editForm.price}
+                      class="input"
+                      style="width: 80px;"
+                    />
+                  {:else}
+                    ${product.price.toFixed(2)}
+                  {/if}
+                </td>
+                
+                <td class="p-3">
+                  {#if editingId === product.id}
+                    <input
+                      type="number"
+                      bind:value={editForm.stock}
+                      class="input"
+                      style="width: 80px;"
+                    />
+                  {:else}
+                    <span class="font-medium">{product.stock}</span>
+                  {/if}
+                </td>
+                
+                <td class="p-3">
+                  {#if editingId === product.id}
+                    <input
+                      type="number"
+                      bind:value={editForm.minStock}
+                      class="input"
+                      style="width: 80px;"
+                    />
+                  {:else}
+                    {product.minStock}
+                  {/if}
+                </td>
+                
+                <td class="p-3">
+                  {#if product.stock <= 0}
+                    <span class="badge badge-danger">Out of Stock</span>
+                  {:else if product.stock <= product.minStock}
+                    <span class="badge badge-warning">Low Stock</span>
+                  {:else}
+                    <span class="badge badge-success">In Stock</span>
+                  {/if}
+                </td>
+                
+                <td class="p-3">
+                  <div class="flex gap-1">
+                    {#if editingId === product.id}
+                      <button class="btn btn-sm btn-success" on:click={saveEdit}>
+                        <Save size={16} />
+                      </button>
+                      <button class="btn btn-sm btn-secondary" on:click={cancelEdit}>
+                        <X size={16} />
+                      </button>
+                    {:else}
+                      <button class="btn btn-sm btn-ghost" on:click={() => startEdit(product)}>
+                        <Edit3 size={16} />
+                      </button>
+                      <button class="btn btn-sm btn-ghost text-danger" on:click={() => deleteProduct(product.id, product.name)}>
+                        <Trash2 size={16} />
+                      </button>
+                    {/if}
+                  </div>
+                </td>
               </tr>
-            </thead>
-            <tbody class="bg-white divide-y divide-gray-200">
-              {#each filteredProducts as product}
-                <tr class="hover:bg-gray-50">
-                  <td class="px-6 py-4 whitespace-nowrap">
-                    <div class="flex items-center">
-                      <span class="text-2xl mr-3">{product.image}</span>
-                      <div>
-                        {#if editingProduct?.id === product.id}
-                          <input
-                            type="text"
-                            bind:value={editingProduct.name}
-                            class="font-medium text-gray-900 border border-gray-300 rounded px-2 py-1 text-sm"
-                          />
-                        {:else}
-                          <div class="font-medium text-gray-900">{product.name}</div>
-                        {/if}
-                      </div>
-                    </div>
-                  </td>
-                  <td class="px-6 py-4 whitespace-nowrap">
-                    {#if editingProduct?.id === product.id}
-                      <select
-                        bind:value={editingProduct.category}
-                        class="text-sm text-gray-600 border border-gray-300 rounded px-2 py-1"
-                      >
-                        {#each categories as category}
-                          <option value={category.value}>{category.label}</option>
-                        {/each}
-                      </select>
-                    {:else}
-                      <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800 capitalize">
-                        {product.category}
-                      </span>
-                    {/if}
-                  </td>
-                  <td class="px-6 py-4 whitespace-nowrap">
-                    {#if editingProduct?.id === product.id}
-                      <input
-                        type="number"
-                        step="0.01"
-                        bind:value={editingProduct.price}
-                        class="text-sm text-gray-900 border border-gray-300 rounded px-2 py-1 w-20"
-                      />
-                    {:else}
-                      <div class="text-sm text-gray-900">{formatCurrency(product.price)}</div>
-                    {/if}
-                  </td>
-                  <td class="px-6 py-4 whitespace-nowrap">
-                    {#if editingProduct?.id === product.id}
-                      <input
-                        type="number"
-                        bind:value={editingProduct.stock}
-                        class="text-sm text-gray-900 border border-gray-300 rounded px-2 py-1 w-16"
-                      />
-                    {:else}
-                      <div class="text-sm text-gray-900 font-medium">{product.stock}</div>
-                    {/if}
-                  </td>
-                  <td class="px-6 py-4 whitespace-nowrap">
-                    {#if editingProduct?.id === product.id}
-                      <input
-                        type="number"
-                        bind:value={editingProduct.minStock}
-                        class="text-sm text-gray-900 border border-gray-300 rounded px-2 py-1 w-16"
-                      />
-                    {:else}
-                      <div class="text-sm text-gray-600">{product.minStock}</div>
-                    {/if}
-                  </td>
-                  <td class="px-6 py-4 whitespace-nowrap">
-                    {#if product.stock <= 0}
-                      <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
-                        Out of Stock
-                      </span>
-                    {:else if product.stock <= product.minStock}
-                      <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                        Low Stock
-                      </span>
-                    {:else}
-                      <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                        In Stock
-                      </span>
-                    {/if}
-                  </td>
-                  <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                    {#if editingProduct?.id === product.id}
-                      <div class="flex items-center space-x-2">
-                        <button
-                          class="text-green-600 hover:text-green-900 p-1 rounded"
-                          on:click={() => updateProduct(product.id, editingProduct)}
-                        >
-                          <Save class="w-4 h-4" />
-                        </button>
-                        <button
-                          class="text-gray-600 hover:text-gray-900 p-1 rounded"
-                          on:click={() => editingProduct = null}
-                        >
-                          <X class="w-4 h-4" />
-                        </button>
-                      </div>
-                    {:else}
-                      <div class="flex items-center space-x-2">
-                        <button
-                          class="text-orange-600 hover:text-orange-900 p-1 rounded"
-                          on:click={() => editingProduct = {...product}}
-                        >
-                          <Edit3 class="w-4 h-4" />
-                        </button>
-                        <button
-                          class="text-red-600 hover:text-red-900 p-1 rounded"
-                          on:click={() => deleteProduct(product.id, product.name)}
-                        >
-                          <Trash2 class="w-4 h-4" />
-                        </button>
-                      </div>
-                    {/if}
-                  </td>
-                </tr>
-              {/each}
-            </tbody>
-          </table>
-        </div>
+            {/each}
+          </tbody>
+        </table>
+        
+        {#if filteredProducts.length === 0}
+          <div class="text-center p-8">
+            <p class="text-gray">No products found</p>
+          </div>
+        {/if}
       </div>
     </div>
   {/if}
 </div>
 
 <!-- Add Product Modal -->
-{#if showAddProduct}
-  <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-    <div class="bg-white rounded-2xl max-w-md w-full p-6">
-      <div class="flex items-center justify-between mb-6">
-        <h3 class="text-xl font-bold text-gray-900">Add New Product</h3>
-        <button
-          class="text-gray-400 hover:text-gray-600"
-          on:click={() => showAddProduct = false}
-        >
-          <X class="w-6 h-6" />
-        </button>
-      </div>
-
-      <form on:submit|preventDefault={addProduct} class="space-y-4">
-        <div>
-          <!-- svelte-ignore a11y_label_has_associated_control -->
-          <label class="block text-sm font-medium text-gray-700 mb-2">Product Name</label>
-          <input
-            type="text"
-            bind:value={newProduct.name}
-            required
-            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-            placeholder="Enter product name"
-          />
-        </div>
-
-        <div>
-          <!-- svelte-ignore a11y_label_has_associated_control -->
-          <!-- svelte-ignore a11y_label_has_associated_control -->
-          <label class="block text-sm font-medium text-gray-700 mb-2">Category</label>
-          <select
-            bind:value={newProduct.category}
-            on:change={(e) => onCategoryChange(e.target.value)}
-            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-          >
-            {#each categories as category}
-              <option value={category.value}>{category.label}</option>
-            {/each}
-          </select>
-        </div>
-
-        <div class="grid grid-cols-2 gap-4">
-            <!-- svelte-ignore a11y_label_has_associated_control -->
-          <div>
-            <label class="block text-sm font-medium text-gray-700 mb-2">Price</label>
-            <input
-              type="number"
-              step="0.01"
-              bind:value={newProduct.price}
-              required
-              min="0"
-              class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-              placeholder="0.00"
-            />
-          </div>
-
-          <div>
-            <!-- svelte-ignore a11y_label_has_associated_control -->
-            <label class="block text-sm font-medium text-gray-700 mb-2">Initial Stock</label>
-            <input
-              type="number"
-              bind:value={newProduct.stock}
-              required
-              min="0"
-              class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-              placeholder="0"
-            />
-          </div>
-        </div>
-
-        <div>
-          <!-- svelte-ignore a11y_label_has_associated_control -->
-          <label class="block text-sm font-medium text-gray-700 mb-2">Minimum Stock Alert</label>
-          <input
-            type="number"
-            bind:value={newProduct.minStock}
-            required
-            min="0"
-            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-            placeholder="5"
-          />
-        </div>
-
-        <div class="flex justify-end space-x-3 pt-4">
-          <button
-            type="button"
-            class="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
-            on:click={() => showAddProduct = false}
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            class="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors"
-          >
-            Add Product
+{#if showAddModal}
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="modal-overlay" on:click={() => showAddModal = false}>
+    <div class="modal-content" on:click|stopPropagation style="max-width: 400px;">
+      <div class="card-body">
+        <div class="flex justify-between items-center mb-4">
+          <h2 class="text-xl font-bold">Add New Product</h2>
+          <button class="btn btn-icon btn-ghost" on:click={() => showAddModal = false}>
+            <X size={20} />
           </button>
         </div>
-      </form>
-    </div>
-  </div>
-{/if}
-
-<!-- Bulk Update Modal -->
-{#if showBulkUpdate}
-  <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-    <div class="bg-white rounded-2xl max-w-4xl w-full max-h-full overflow-hidden">
-      <div class="flex items-center justify-between p-6 border-b border-gray-200">
-        <h3 class="text-xl font-bold text-gray-900">Bulk Stock Update</h3>
-        <button
-          class="text-gray-400 hover:text-gray-600"
-          on:click={() => showBulkUpdate = false}
-        >
-          <X class="w-6 h-6" />
-        </button>
-      </div>
-
-      <div class="p-6 max-h-96 overflow-y-auto">
-        <div class="space-y-4">
-          {#each bulkUpdates as update, index}
-            <div class="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
-              <div class="flex-1">
-                <h4 class="font-medium text-gray-900">{update.productName}</h4>
-                <p class="text-sm text-gray-600">Current: {update.currentStock}</p>
-              </div>
-              <div class="flex items-center space-x-4">
-                <div class="flex items-center space-x-2">
-                  <!-- svelte-ignore a11y_label_has_associated_control -->
-                  <label class="text-sm font-medium text-gray-700">New Stock:</label>
-                  <input
-                    type="number"
-                    bind:value={bulkUpdates[index].newStock}
-                    min="0"
-                    class="w-20 px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                  />
-                </div>
-                {#if update.newStock !== update.currentStock}
-                  <span class="text-sm font-medium {update.newStock > update.currentStock ? 'text-green-600' : 'text-red-600'}">
-                    {update.newStock > update.currentStock ? '+' : ''}{update.newStock - update.currentStock}
-                  </span>
-                {/if}
-              </div>
+        
+        <form on:submit|preventDefault={addProduct} class="flex flex-col gap-3">
+          <div>
+            <!-- svelte-ignore a11y_label_has_associated_control -->
+            <label class="text-sm text-gray mb-1 block">Product Name</label>
+            <input
+              type="text"
+              bind:value={newProduct.name}
+              class="input"
+              placeholder="Enter product name"
+              required
+            />
+          </div>
+          
+          <div>
+            <!-- svelte-ignore a11y_label_has_associated_control -->
+            <!-- svelte-ignore a11y_label_has_associated_control -->
+            <label class="text-sm text-gray mb-1 block">Category</label>
+            <select 
+              bind:value={newProduct.category} 
+              on:change={updateProductEmoji}
+              class="input"
+            >
+              {#each categories as category}
+                <option value={category.id}>{category.emoji} {category.name}</option>
+              {/each}
+            </select>
+          </div>
+          
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <!-- svelte-ignore a11y_label_has_associated_control -->
+              <label class="text-sm text-gray mb-1 block">Price</label>
+              <input
+                type="number"
+                step="0.01"
+                bind:value={newProduct.price}
+                class="input"
+                placeholder="0.00"
+                required
+              />
             </div>
-          {/each}
-        </div>
-      </div>
-
-      <div class="flex justify-end space-x-3 p-6 border-t border-gray-200">
-        <button
-          class="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
-          on:click={() => showBulkUpdate = false}
-        >
-          Cancel
-        </button>
-        <button
-          class="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors"
-          on:click={processBulkUpdate}
-        >
-          Update All
-        </button>
-      </div>
-    </div>
-  </div>
-{/if}
-
-<!-- Inventory Logs Modal -->
-{#if showInventoryLogs}
-  <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-    <div class="bg-white rounded-2xl max-w-4xl w-full max-h-full overflow-hidden">
-      <div class="flex items-center justify-between p-6 border-b border-gray-200">
-        <h3 class="text-xl font-bold text-gray-900">Inventory Logs</h3>
-        <button
-          class="text-gray-400 hover:text-gray-600"
-          on:click={() => showInventoryLogs = false}
-        >
-          <X class="w-6 h-6" />
-        </button>
-      </div>
-
-      <div class="p-6 max-h-96 overflow-y-auto">
-        <div class="space-y-3">
-          {#each inventoryLogs as log}
-            <div class="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
-              <div class="flex-1">
-                <h4 class="font-medium text-gray-900">{log.productName}</h4>
-                <p class="text-sm text-gray-600">{formatDate(log.createdAt)}</p>
-                <p class="text-xs text-gray-500 capitalize">{log.changeReason.replace('_', ' ')}</p>
-              </div>
-              <div class="text-right">
-                <div class="flex items-center space-x-2">
-                  <span class="text-sm text-gray-600">{log.previousStock}</span>
-                  <span class="text-gray-400">→</span>
-                  <span class="text-sm font-medium text-gray-900">{log.newStock}</span>
-                </div>
-                <div class="text-sm font-medium {log.changeQuantity > 0 ? 'text-green-600' : 'text-red-600'}">
-                  {log.changeQuantity > 0 ? '+' : ''}{log.changeQuantity}
-                </div>
-              </div>
+            
+            <div>
+              <!-- svelte-ignore a11y_label_has_associated_control -->
+              <label class="text-sm text-gray mb-1 block">Initial Stock</label>
+              <input
+                type="number"
+                bind:value={newProduct.stock}
+                class="input"
+                placeholder="0"
+                required
+              />
             </div>
-          {/each}
-        </div>
-      </div>
-
-      <div class="flex justify-end p-6 border-t border-gray-200">
-        <button
-          class="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
-          on:click={() => showInventoryLogs = false}
-        >
-          Close
-        </button>
+          </div>
+          
+          <div>
+            <!-- svelte-ignore a11y_label_has_associated_control -->
+            <label class="text-sm text-gray mb-1 block">Minimum Stock Alert</label>
+            <input
+              type="number"
+              bind:value={newProduct.minStock}
+              class="input"
+              placeholder="5"
+              required
+            />
+          </div>
+          
+          <div class="flex gap-2 mt-4">
+            <button type="button" class="btn btn-secondary flex-1" on:click={() => showAddModal = false}>
+              Cancel
+            </button>
+            <button type="submit" class="btn btn-primary flex-1">
+              Add Product
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   </div>
 {/if}
-{/if}
+
+<style>
+  .grid { display: grid; }
+  .grid-cols-2 { grid-template-columns: repeat(2, 1fr); }
+  .w-full { width: 100%; }
+  .overflow-x-auto { overflow-x: auto; }
+  table th { font-weight: 600; color: var(--gray-700); }
+  .flex-1 { flex: 1; }
+  .hover\:bg-gray-50:hover { background-color: var(--gray-50); }
+  
+  @media (min-width: 1024px) {
+    .lg-grid-cols-4 { grid-template-columns: repeat(4, 1fr); }
+  }
+</style>

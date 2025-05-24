@@ -1,14 +1,9 @@
 import { writable } from 'svelte/store';
-import { 
-  signInWithEmailAndPassword, 
-  createUserWithEmailAndPassword, 
-  signOut, 
-  onAuthStateChanged 
-} from 'firebase/auth';
-import { auth } from '../firebase.js';
+import { auth } from '$lib/firebase.js';
+import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth';
 import { browser } from '$app/environment';
 
-// Create the user store
+// Create stores
 export const user = writable(null);
 export const loading = writable(true);
 export const error = writable(null);
@@ -16,8 +11,16 @@ export const error = writable(null);
 // Initialize auth state listener
 if (browser && auth) {
   onAuthStateChanged(auth, (firebaseUser) => {
-    // @ts-ignore
-    user.set(firebaseUser);
+    if (firebaseUser) {
+      // @ts-ignore
+      user.set({
+        uid: firebaseUser.uid,
+        email: firebaseUser.email,
+        displayName: firebaseUser.displayName
+      });
+    } else {
+      user.set(null);
+    }
     loading.set(false);
   });
 }
@@ -25,44 +28,17 @@ if (browser && auth) {
 // Login function
 // @ts-ignore
 export async function login(email, password) {
+  error.set(null);
   try {
-    loading.set(true);
-    error.set(null);
-    
     // @ts-ignore
     const userCredential = await signInWithEmailAndPassword(auth, email, password);
-    // @ts-ignore
-    user.set(userCredential.user);
-    
     return userCredential.user;
   } catch (err) {
     // @ts-ignore
-    error.set(err.message);
+    const errorMessage = getErrorMessage(err.code);
+    // @ts-ignore
+    error.set(errorMessage);
     throw err;
-  } finally {
-    loading.set(false);
-  }
-}
-
-// Register function
-// @ts-ignore
-export async function register(email, password) {
-  try {
-    loading.set(true);
-    error.set(null);
-    
-    // @ts-ignore
-    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-    // @ts-ignore
-    user.set(userCredential.user);
-    
-    return userCredential.user;
-  } catch (err) {
-    // @ts-ignore
-    error.set(err.message);
-    throw err;
-  } finally {
-    loading.set(false);
   }
 }
 
@@ -73,8 +49,26 @@ export async function logout() {
     await signOut(auth);
     user.set(null);
   } catch (err) {
-    // @ts-ignore
-    error.set(err.message);
+    console.error('Logout error:', err);
     throw err;
+  }
+}
+
+// Helper function for user-friendly error messages
+// @ts-ignore
+function getErrorMessage(code) {
+  switch (code) {
+    case 'auth/user-not-found':
+      return 'No account found with this email';
+    case 'auth/wrong-password':
+      return 'Incorrect password';
+    case 'auth/invalid-email':
+      return 'Invalid email address';
+    case 'auth/user-disabled':
+      return 'This account has been disabled';
+    case 'auth/too-many-requests':
+      return 'Too many failed attempts. Please try again later';
+    default:
+      return 'Login failed. Please try again';
   }
 }

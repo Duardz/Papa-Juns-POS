@@ -1,297 +1,499 @@
-<!-- login page/landing page -->
 <script>
-  import { onMount } from 'svelte';
-  import { user, login, error } from '$lib/stores/auth.js';
+// @ts-nocheck
+
+  import { onMount, onDestroy } from 'svelte';
+  import { user, logout } from '$lib/stores/auth.js';
   import { goto } from '$app/navigation';
-  import { ChefHat, Mail, Lock, Eye, EyeOff, ArrowRight, Store, BarChart3, Package, Shield, Clock, Zap } from 'lucide-svelte';
+  import { productsService, ordersService } from '$lib/services/firestore.js';
+  import { 
+    ShoppingCart, Plus, Minus, X, CreditCard, LogOut, 
+    // @ts-ignore
+    Package, Receipt, Search, AlertTriangle
+  } from 'lucide-svelte';
 
-  let email = '';
-  let password = '';
-  let showPassword = false;
-  let isLoading = false;
+  // State
+  // @ts-ignore
+  let products = [];
+  // @ts-ignore
+  let cart = [];
+  let searchQuery = '';
+  let selectedCategory = 'all';
+  let showCart = false;
+  let loading = true;
+  let processing = false;
+  // @ts-ignore
+  let unsubscribe;
 
-  // Redirect if already authenticated
-  onMount(() => {
-    const unsubscribe = user.subscribe((currentUser) => {
-      if (currentUser) {
-        goto('/pos');
-      }
-    });
-    return unsubscribe;
+  // Categories
+  const categories = [
+    { id: 'all', name: 'All', emoji: '🍽️' },
+    { id: 'chicken', name: 'Chicken', emoji: '🍗' },
+    { id: 'fries', name: 'Fries', emoji: '🍟' },
+    { id: 'drinks', name: 'Drinks', emoji: '🥤' }
+  ];
+
+  // Computed
+ // @ts-ignore
+   $: filteredProducts = products.filter(p => {
+    const matchesCategory = selectedCategory === 'all' || p.category === selectedCategory;
+    const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase());
+    return matchesCategory && matchesSearch;
   });
+  
+ // @ts-ignore
+   $: cartTotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+  $: cartTax = cartTotal * 0.08;
+  $: cartGrandTotal = cartTotal + cartTax;
+ // @ts-ignore
+   $: cartItemsCount = cart.reduce((sum, item) => sum + item.quantity, 0);
 
-  async function handleLogin() {
-    if (!email || !password) {
+  onMount(async () => {
+    if (!$user) {
+      goto('/auth/login');
       return;
     }
 
     try {
-      isLoading = true;
-      await login(email, password);
-      // User will be redirected by the onMount subscription
-    } catch (err) {
-      console.error('Login failed:', err);
-    } finally {
-      isLoading = false;
+      loading = true;
+      // @ts-ignore
+      unsubscribe = productsService.listen((updatedProducts) => {
+        products = updatedProducts;
+        loading = false;
+      });
+    } catch (error) {
+      console.error('Error loading products:', error);
+      loading = false;
+    }
+  });
+
+  onDestroy(() => {
+    // @ts-ignore
+    if (unsubscribe) unsubscribe();
+  });
+
+  // @ts-ignore
+  function addToCart(product) {
+    if (product.stock <= 0) return;
+    
+    // @ts-ignore
+    const existingItem = cart.find(item => item.id === product.id);
+    if (existingItem) {
+      if (existingItem.quantity >= product.stock) {
+        showToast(`Only ${product.stock} available`, 'warning');
+        return;
+      }
+      existingItem.quantity += 1;
+      // @ts-ignore
+      cart = [...cart];
+    } else {
+      // @ts-ignore
+      cart = [...cart, { ...product, quantity: 1 }];
+    }
+    
+    showToast(`Added ${product.name}`, 'success');
+  }
+
+  // @ts-ignore
+  function updateQuantity(itemId, delta) {
+    // @ts-ignore
+    const item = cart.find(i => i.id === itemId);
+    // @ts-ignore
+    const product = products.find(p => p.id === itemId);
+    
+    if (!item || !product) return;
+    
+    const newQuantity = item.quantity + delta;
+    
+    if (newQuantity <= 0) {
+      // @ts-ignore
+      cart = cart.filter(i => i.id !== itemId);
+    } else if (newQuantity <= product.stock) {
+      item.quantity = newQuantity;
+      // @ts-ignore
+      cart = [...cart];
+    } else {
+      showToast(`Only ${product.stock} available`, 'warning');
     }
   }
 
-  function togglePassword() {
-    showPassword = !showPassword;
+  // @ts-ignore
+  function removeFromCart(itemId) {
+    // @ts-ignore
+    cart = cart.filter(item => item.id !== itemId);
+  }
+
+  async function processOrder() {
+    if (cart.length === 0 || processing) return;
+    
+    processing = true;
+    try {
+      const orderData = {
+        orderNumber: `ORD-${Date.now().toString().slice(-6)}`,
+        subtotal: cartTotal,
+        tax: cartTax,
+        total: cartGrandTotal,
+        itemCount: cartItemsCount,
+        // @ts-ignore
+        cashier: $user.email,
+        paymentMethod: 'cash',
+        status: 'completed'
+      };
+
+      // @ts-ignore
+      await ordersService.create(orderData, cart);
+      
+      showToast('Order completed successfully!', 'success');
+      cart = [];
+      showCart = false;
+    } catch (error) {
+      console.error('Error processing order:', error);
+      showToast('Failed to process order', 'error');
+    } finally {
+      processing = false;
+    }
+  }
+
+  // @ts-ignore
+  function showToast(message, type = 'info') {
+    const container = document.getElementById('toast-container') || createToastContainer();
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    toast.innerHTML = `
+      <div class="flex items-center gap-2">
+        <span>${message}</span>
+      </div>
+    `;
+    
+    container.appendChild(toast);
+    setTimeout(() => {
+      toast.style.animation = 'toast-slide-out 0.3s ease forwards';
+      setTimeout(() => toast.remove(), 300);
+    }, 3000);
+  }
+
+  function createToastContainer() {
+    const container = document.createElement('div');
+    container.id = 'toast-container';
+    document.body.appendChild(container);
+    return container;
+  }
+
+  async function handleLogout() {
+    await logout();
+    goto('/auth/login');
   }
 </script>
 
 <svelte:head>
-  <title>Papa Jun's POS - Restaurant Management System</title>
-  <meta name="description" content="Complete point of sale and inventory management system for Papa Jun's Fried Chicken restaurant." />
+  <title>POS - Papa Jun's</title>
 </svelte:head>
 
-<div class="min-h-screen bg-white">
-  <!-- Navigation -->
-  <nav class="fixed top-0 left-0 right-0 bg-white/90 backdrop-blur-md border-b border-gray-100 z-50">
-    <div class="max-w-6xl mx-auto px-6">
-      <div class="flex justify-between items-center h-16">
-        <div class="flex items-center space-x-3">
-          <div class="w-9 h-9 bg-gradient-to-r from-orange-500 to-red-500 rounded-xl flex items-center justify-center shadow-lg">
-            <ChefHat class="w-5 h-5 text-white" />
-          </div>
-          <div class="flex flex-col">
-            <h1 class="text-lg font-bold text-gray-900">Papa Jun's</h1>
-            <span class="text-xs text-gray-500 -mt-1">POS System</span>
-          </div>
-        </div>
-        
-        <div class="hidden sm:block">
-          <span class="text-sm text-gray-600 bg-gray-50 px-4 py-2 rounded-full">
-            🔒 Secure Access
-          </span>
-        </div>
-      </div>
+<!-- Header -->
+<header class="header">
+  <div class="header-content">
+    <div class="logo">
+      <div class="logo-icon">🍗</div>
+      <span>Papa Jun's POS</span>
     </div>
-  </nav>
+    
+    <nav class="flex items-center gap-3">
+      <a href="/inventory" class="btn btn-ghost">
+        <Package size={18} />
+        <span class="hidden sm-block">Inventory</span>
+      </a>
+      <a href="/orders" class="btn btn-ghost">
+        <Receipt size={18} />
+        <span class="hidden sm-block">Orders</span>
+      </a>
+      <button class="btn btn-ghost text-danger" on:click={handleLogout}>
+        <LogOut size={18} />
+        <span class="hidden sm-block">Logout</span>
+      </button>
+    </nav>
+  </div>
+</header>
 
-  <!-- Hero Section -->
-  <section class="pt-24 pb-12 px-6">
-    <div class="max-w-6xl mx-auto">
-      <div class="text-center max-w-3xl mx-auto mb-16">
-        <div class="inline-flex items-center space-x-2 bg-orange-50 text-orange-700 px-4 py-2 rounded-full text-sm font-medium mb-6">
-          <Zap class="w-4 h-4" />
-          <span>Complete Restaurant Solution</span>
-        </div>
-        
-        <h1 class="text-5xl md:text-6xl font-bold text-gray-900 leading-tight mb-6">
-          Modern POS for
-          <br>
-          <span class="bg-gradient-to-r from-orange-500 via-red-500 to-pink-500 bg-clip-text text-transparent">
-            Papa Jun's Kitchen
-          </span>
-        </h1>
-        
-        <p class="text-xl text-gray-600 leading-relaxed mb-8">
-          Streamline your fried chicken restaurant operations with our intuitive point-of-sale system, 
-          real-time inventory management, and powerful analytics.
-        </p>
-      </div>
-
-      <!-- Features Grid -->
-      <div class="grid md:grid-cols-3 gap-8 mb-16">
-        <div class="group">
-          <div class="bg-gradient-to-br from-orange-50 to-red-50 p-8 rounded-2xl border border-orange-100 hover:shadow-lg transition-all duration-300 group-hover:-translate-y-1">
-            <div class="w-12 h-12 bg-gradient-to-r from-orange-500 to-red-500 rounded-xl flex items-center justify-center mb-4">
-              <Store class="w-6 h-6 text-white" />
-            </div>
-            <h3 class="text-xl font-semibold text-gray-900 mb-2">Smart POS</h3>
-            <p class="text-gray-600">Lightning-fast order processing with real-time inventory updates and intuitive touch interface.</p>
+<div class="pos-layout">
+  <!-- Products Section -->
+  <div class="flex flex-col gap-4">
+    <!-- Search & Filters -->
+    <div class="card">
+      <div class="card-body">
+        <div class="flex flex-col gap-3">
+          <!-- Search -->
+          <div class="relative">
+            <Search class="absolute left-3 top-1/2 -translate-y-1/2 text-gray" size={18} />
+            <input
+              type="text"
+              placeholder="Search products..."
+              bind:value={searchQuery}
+              class="input"
+              style="padding-left: 2.5rem;"
+            />
           </div>
-        </div>
-        
-        <div class="group">
-          <div class="bg-gradient-to-br from-blue-50 to-indigo-50 p-8 rounded-2xl border border-blue-100 hover:shadow-lg transition-all duration-300 group-hover:-translate-y-1">
-            <div class="w-12 h-12 bg-gradient-to-r from-blue-500 to-indigo-500 rounded-xl flex items-center justify-center mb-4">
-              <Package class="w-6 h-6 text-white" />
-            </div>
-            <h3 class="text-xl font-semibold text-gray-900 mb-2">Inventory Control</h3>
-            <p class="text-gray-600">Automatic stock tracking, low-stock alerts, and seamless product management for your kitchen.</p>
-          </div>
-        </div>
-        
-        <div class="group">
-          <div class="bg-gradient-to-br from-green-50 to-emerald-50 p-8 rounded-2xl border border-green-100 hover:shadow-lg transition-all duration-300 group-hover:-translate-y-1">
-            <div class="w-12 h-12 bg-gradient-to-r from-green-500 to-emerald-500 rounded-xl flex items-center justify-center mb-4">
-              <BarChart3 class="w-6 h-6 text-white" />
-            </div>
-            <h3 class="text-xl font-semibold text-gray-900 mb-2">Sales Analytics</h3>
-            <p class="text-gray-600">Comprehensive reports and insights to help you make data-driven business decisions.</p>
+          
+          <!-- Categories -->
+          <div class="flex gap-2 flex-wrap">
+            {#each categories as category}
+              <button
+                class="btn btn-sm {selectedCategory === category.id ? 'btn-primary' : 'btn-secondary'}"
+                on:click={() => selectedCategory = category.id}
+              >
+                <span>{category.emoji}</span>
+                <span>{category.name}</span>
+              </button>
+            {/each}
           </div>
         </div>
       </div>
     </div>
-  </section>
 
-  <!-- Login Section -->
-  <section class="py-16 bg-gray-50">
-    <div class="max-w-md mx-auto px-6">
-      <div class="bg-white p-8 rounded-2xl shadow-xl border border-gray-100">
-        <!-- Login Header -->
-        <div class="text-center mb-8">
-          <div class="w-16 h-16 bg-gradient-to-r from-orange-500 to-red-500 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg">
-            <Shield class="w-8 h-8 text-white" />
-          </div>
-          <h2 class="text-2xl font-bold text-gray-900 mb-2">Welcome Back</h2>
-          <p class="text-gray-600">Sign in to access your restaurant dashboard</p>
+    <!-- Products Grid -->
+    {#if loading}
+      <div class="card">
+        <div class="card-body text-center">
+          <div class="animate-spin text-primary">⏳</div>
+          <p class="text-gray mt-2">Loading products...</p>
         </div>
-
-        <!-- Login Form -->
-        <form on:submit|preventDefault={handleLogin} class="space-y-6">
-          <div class="space-y-4">
-            <div>
-              <label for="email" class="block text-sm font-medium text-gray-700 mb-2">
-                Email Address
-              </label>
-              <div class="relative group">
-                <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                  <Mail class="h-5 w-5 text-gray-400 group-focus-within:text-orange-500 transition-colors" />
-                </div>
-                <input
-                  id="email"
-                  type="email"
-                  bind:value={email}
-                  required
-                  class="w-full pl-12 pr-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all duration-200 bg-gray-50 focus:bg-white"
-                  placeholder="admin@papajuns.com"
-                  disabled={isLoading}
-                />
-              </div>
-            </div>
-
-            <div>
-              <label for="password" class="block text-sm font-medium text-gray-700 mb-2">
-                Password
-              </label>
-              <div class="relative group">
-                <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                  <Lock class="h-5 w-5 text-gray-400 group-focus-within:text-orange-500 transition-colors" />
-                </div>
-                <input
-                  id="password"
-                  type={showPassword ? 'text' : 'password'}
-                  bind:value={password}
-                  required
-                  class="w-full pl-12 pr-12 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all duration-200 bg-gray-50 focus:bg-white"
-                  placeholder="Enter your password"
-                  disabled={isLoading}
-                />
-                <button
-                  type="button"
-                  class="absolute inset-y-0 right-0 pr-4 flex items-center hover:bg-gray-50 rounded-r-xl transition-colors"
-                  on:click={togglePassword}
-                >
-                  {#if showPassword}
-                    <EyeOff class="h-5 w-5 text-gray-400 hover:text-gray-600" />
-                  {:else}
-                    <Eye class="h-5 w-5 text-gray-400 hover:text-gray-600" />
-                  {/if}
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {#if $error}
-            <div class="bg-red-50 border border-red-200 rounded-xl p-4">
-              <p class="text-sm text-red-700 font-medium">{$error}</p>
-            </div>
-          {/if}
-
+      </div>
+    {:else if filteredProducts.length === 0}
+      <div class="card">
+        <div class="card-body text-center">
+          <p class="text-gray">No products found</p>
+        </div>
+      </div>
+    {:else}
+      <div class="product-grid">
+        {#each filteredProducts as product}
           <button
-            type="submit"
-            class="w-full bg-gradient-to-r from-orange-500 to-red-500 text-white py-3 px-6 rounded-xl font-semibold hover:from-orange-600 hover:to-red-600 focus:ring-2 focus:ring-orange-500/20 focus:outline-none transition-all duration-200 shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
-            disabled={isLoading || !email || !password}
+            class="product-card {product.stock <= 0 ? 'out-of-stock' : product.stock <= product.minStock ? 'low-stock' : ''}"
+            on:click={() => addToCart(product)}
+            disabled={product.stock <= 0}
           >
-            {#if isLoading}
-              <div class="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-              <span>Signing in...</span>
-            {:else}
-              <span>Sign In to Dashboard</span>
-              <ArrowRight class="w-4 h-4" />
-            {/if}
+            <div class="product-stock">
+              {#if product.stock <= 0}
+                <span class="badge badge-danger">Out</span>
+              {:else if product.stock <= product.minStock}
+                <span class="badge badge-warning">{product.stock}</span>
+              {/if}
+            </div>
+            
+            <div class="product-emoji">{product.image}</div>
+            <div class="product-name">{product.name}</div>
+            <div class="product-price">${product.price.toFixed(2)}</div>
           </button>
-        </form>
-
-        <!-- Footer Note -->
-        <div class="mt-8 pt-6 border-t border-gray-100">
-          <div class="flex items-center justify-center space-x-2 text-sm text-gray-500">
-            <Shield class="w-4 h-4" />
-            <span>Authorized personnel only</span>
-          </div>
-          <p class="text-xs text-gray-400 text-center mt-2">
-            Contact Papa Jun for access credentials
-          </p>
-        </div>
+        {/each}
       </div>
-    </div>
-  </section>
+    {/if}
+  </div>
 
-  <!-- Trust Indicators -->
-  <section class="py-12 bg-white border-t border-gray-100">
-    <div class="max-w-4xl mx-auto px-6">
-      <div class="grid md:grid-cols-3 gap-8 text-center">
-        <div class="flex flex-col items-center space-y-3">
-          <div class="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
-            <Shield class="w-6 h-6 text-green-600" />
+  <!-- Desktop Cart -->
+  <div class="cart lg-block hidden">
+    <div class="cart-header">
+      <h2 class="text-lg font-bold">Cart</h2>
+      {#if cart.length > 0}
+        <span class="badge badge-info">{cartItemsCount} items</span>
+      {/if}
+    </div>
+
+    {#if cart.length === 0}
+      <div class="empty-state">
+        <div class="empty-state-icon">🛒</div>
+        <p class="empty-state-text">Your cart is empty</p>
+      </div>
+    {:else}
+      <div class="cart-items">
+        {#each cart as item}
+          <div class="cart-item">
+            <div class="cart-item-info">
+              <div class="cart-item-name">{item.name}</div>
+              <div class="cart-item-price">${item.price.toFixed(2)} each</div>
+            </div>
+            
+            <div class="cart-item-quantity">
+              <button 
+                class="btn btn-sm btn-icon btn-ghost"
+                on:click={() => updateQuantity(item.id, -1)}
+              >
+                <Minus size={16} />
+              </button>
+              <span class="font-bold">{item.quantity}</span>
+              <button 
+                class="btn btn-sm btn-icon btn-ghost"
+                on:click={() => updateQuantity(item.id, 1)}
+              >
+                <Plus size={16} />
+              </button>
+            </div>
+            
+            <div class="cart-item-total">
+              ${(item.price * item.quantity).toFixed(2)}
+            </div>
+            
+            <button 
+              class="btn btn-sm btn-icon btn-ghost text-danger"
+              on:click={() => removeFromCart(item.id)}
+            >
+              <X size={16} />
+            </button>
           </div>
-          <h4 class="font-semibold text-gray-900">Secure & Reliable</h4>
-          <p class="text-sm text-gray-600">Bank-level security with Firebase authentication</p>
+        {/each}
+      </div>
+    {/if}
+
+    <div class="cart-footer">
+      {#if cart.length > 0}
+        <div class="cart-summary">
+          <div class="cart-summary-row">
+            <span>Subtotal</span>
+            <span>${cartTotal.toFixed(2)}</span>
+          </div>
+          <div class="cart-summary-row">
+            <span>Tax (8%)</span>
+            <span>${cartTax.toFixed(2)}</span>
+          </div>
+          <div class="cart-summary-row cart-summary-total">
+            <span>Total</span>
+            <span>${cartGrandTotal.toFixed(2)}</span>
+          </div>
         </div>
         
-        <div class="flex flex-col items-center space-y-3">
-          <div class="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center">
-            <Clock class="w-6 h-6 text-blue-600" />
-          </div>
-          <h4 class="font-semibold text-gray-900">Real-time Updates</h4>
-          <p class="text-sm text-gray-600">Instant inventory and sales synchronization</p>
-        </div>
-        
-        <div class="flex flex-col items-center space-y-3">
-          <div class="w-12 h-12 bg-purple-100 rounded-full flex items-center justify-center">
-            <Zap class="w-6 h-6 text-purple-600" />
-          </div>
-          <h4 class="font-semibold text-gray-900">Lightning Fast</h4>
-          <p class="text-sm text-gray-600">Optimized for busy restaurant environments</p>
-        </div>
-      </div>
+        <button 
+          class="btn btn-primary btn-lg w-full"
+          on:click={processOrder}
+          disabled={processing}
+        >
+          {#if processing}
+            <span class="animate-spin">⏳</span>
+            <span>Processing...</span>
+          {:else}
+            <CreditCard size={20} />
+            <span>Complete Order</span>
+          {/if}
+        </button>
+      {:else}
+        <button class="btn btn-secondary btn-lg w-full" disabled>
+          <CreditCard size={20} />
+          <span>Add items to cart</span>
+        </button>
+      {/if}
     </div>
-  </section>
-
-  <!-- Footer -->
-  <footer class="bg-gray-900 text-white py-8">
-    <div class="max-w-6xl mx-auto px-6">
-      <div class="flex flex-col md:flex-row items-center justify-between">
-        <div class="flex items-center space-x-3 mb-4 md:mb-0">
-          <div class="w-8 h-8 bg-gradient-to-r from-orange-500 to-red-500 rounded-lg flex items-center justify-center">
-            <ChefHat class="w-4 h-4 text-white" />
-          </div>
-          <div>
-            <span class="font-bold">Papa Jun's POS System</span>
-            <p class="text-xs text-gray-400">Professional Restaurant Management</p>
-          </div>
-        </div>
-        
-        <div class="text-center md:text-right">
-          <p class="text-sm text-gray-300">Version 1.0</p>
-          <p class="text-xs text-gray-500">Built with SvelteKit & Firebase</p>
-        </div>
-      </div>
-    </div>
-  </footer>
+  </div>
 </div>
 
+<!-- Mobile Cart Button -->
+<div class="mobile-cart">
+  <button class="mobile-cart-button" on:click={() => showCart = true}>
+    <ShoppingCart size={24} />
+    {#if cartItemsCount > 0}
+      <span class="mobile-cart-badge">{cartItemsCount}</span>
+    {/if}
+  </button>
+</div>
+
+<!-- Mobile Cart Modal -->
+{#if showCart}
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="modal-overlay lg-hidden" on:click={() => showCart = false}>
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="modal-content" on:click|stopPropagation>
+      <div class="cart">
+        <div class="cart-header">
+          <h2 class="text-lg font-bold">Cart</h2>
+          <button class="btn btn-icon btn-ghost" on:click={() => showCart = false}>
+            <X size={20} />
+          </button>
+        </div>
+
+        {#if cart.length === 0}
+          <div class="empty-state">
+            <div class="empty-state-icon">🛒</div>
+            <p class="empty-state-text">Your cart is empty</p>
+          </div>
+        {:else}
+          <div class="cart-items">
+            {#each cart as item}
+              <div class="cart-item">
+                <div class="cart-item-info">
+                  <div class="cart-item-name">{item.name}</div>
+                  <div class="cart-item-price">${item.price.toFixed(2)} each</div>
+                </div>
+                
+                <div class="cart-item-quantity">
+                  <button 
+                    class="btn btn-sm btn-icon btn-ghost"
+                    on:click={() => updateQuantity(item.id, -1)}
+                  >
+                    <Minus size={16} />
+                  </button>
+                  <span class="font-bold">{item.quantity}</span>
+                  <button 
+                    class="btn btn-sm btn-icon btn-ghost"
+                    on:click={() => updateQuantity(item.id, 1)}
+                  >
+                    <Plus size={16} />
+                  </button>
+                </div>
+                
+                <div class="cart-item-total">
+                  ${(item.price * item.quantity).toFixed(2)}
+                </div>
+                
+                <button 
+                  class="btn btn-sm btn-icon btn-ghost text-danger"
+                  on:click={() => removeFromCart(item.id)}
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            {/each}
+          </div>
+        {/if}
+
+        <div class="cart-footer">
+          {#if cart.length > 0}
+            <div class="cart-summary">
+              <div class="cart-summary-row">
+                <span>Subtotal</span>
+                <span>${cartTotal.toFixed(2)}</span>
+              </div>
+              <div class="cart-summary-row">
+                <span>Tax (8%)</span>
+                <span>${cartTax.toFixed(2)}</span>
+              </div>
+              <div class="cart-summary-row cart-summary-total">
+                <span>Total</span>
+                <span>${cartGrandTotal.toFixed(2)}</span>
+              </div>
+            </div>
+            
+            <button 
+              class="btn btn-primary btn-lg w-full"
+              on:click={processOrder}
+              disabled={processing}
+            >
+              {#if processing}
+                <span class="animate-spin">⏳</span>
+                <span>Processing...</span>
+              {:else}
+                <CreditCard size={20} />
+                <span>Complete Order</span>
+              {/if}
+            </button>
+          {:else}
+            <button class="btn btn-secondary btn-lg w-full" disabled>
+              <CreditCard size={20} />
+              <span>Add items to cart</span>
+            </button>
+          {/if}
+        </div>
+      </div>
+    </div>
+  </div>
+{/if}
+
 <style>
-  .animate-spin {
-    animation: spin 1s linear infinite;
-  }
-  
-  @keyframes spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
-  }
+  .w-full { width: 100%; }
+  .flex-wrap { flex-wrap: wrap; }
 </style>
