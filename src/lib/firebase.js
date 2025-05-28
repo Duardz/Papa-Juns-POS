@@ -24,14 +24,6 @@ let analytics = null;
 
 if (browser) {
   try {
-    // Log config to debug (remove in production)
-    console.log('Firebase config:', {
-      ...firebaseConfig,
-      apiKey: firebaseConfig.apiKey ? 'SET' : 'MISSING',
-      authDomain: firebaseConfig.authDomain ? 'SET' : 'MISSING',
-      projectId: firebaseConfig.projectId ? 'SET' : 'MISSING'
-    });
-
     app = initializeApp(firebaseConfig);
     auth = getAuth(app);
     db = getFirestore(app);
@@ -39,13 +31,6 @@ if (browser) {
     if (firebaseConfig.measurementId) {
       analytics = getAnalytics(app);
     }
-
-    // Debug log
-    console.log('Firebase initialized:', {
-      app: app ? 'YES' : 'NO',
-      auth: auth ? 'YES' : 'NO',
-      db: db ? 'YES' : 'NO'
-    });
 
     // Optional: Connect to Firestore emulator in development
     if (import.meta.env.DEV && import.meta.env.VITE_USE_EMULATOR === 'true') {

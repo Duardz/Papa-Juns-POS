@@ -4,16 +4,18 @@
   import { onMount, onDestroy } from 'svelte';
   import { user } from '$lib/stores/auth.js';
   import { goto } from '$app/navigation';
-  import { productsService } from '$lib/services/firestore.js';
+  import { productsService, inventoryService } from '$lib/services/firestore.js';
   import { 
     Package, Plus, Edit3, Trash2, Save, X, AlertTriangle, 
     // @ts-ignore
-    Search, ArrowLeft, TrendingDown
+    Search, ArrowLeft, TrendingDown, History, FileSpreadsheet, Eye
   } from 'lucide-svelte';
 
   // State
   // @ts-ignore
   let products = [];
+  // @ts-ignore
+  let inventoryLogs = [];
   let loading = true;
   let searchQuery = '';
   let selectedCategory = 'all';
@@ -21,8 +23,17 @@
   let editingId = null;
   let editForm = {};
   let showAddModal = false;
+  let showLogsModal = false;
+  let showStockModal = false;
   // @ts-ignore
   let unsubscribe;
+  // @ts-ignore
+  let selectedProduct = null;
+  let stockAdjustment = {
+    quantity: '',
+    reason: 'restock',
+    type: 'add' // 'add' or 'remove'
+  };
 
   // New product form
   let newProduct = {
@@ -38,6 +49,14 @@
     { id: 'chicken', name: 'Chicken', emoji: '🍗' },
     { id: 'fries', name: 'Fries', emoji: '🍟' },
     { id: 'drinks', name: 'Drinks', emoji: '🥤' }
+  ];
+
+  const adjustmentReasons = [
+    { value: 'restock', label: 'Restock' },
+    { value: 'damaged', label: 'Damaged' },
+    { value: 'expired', label: 'Expired' },
+    { value: 'adjustment', label: 'Manual Adjustment' },
+    { value: 'return', label: 'Customer Return' }
   ];
 
   // Computed
@@ -68,6 +87,9 @@
         products = updatedProducts;
         loading = false;
       });
+      
+      // Load inventory logs
+      inventoryLogs = await inventoryService.getLogs(100);
     } catch (error) {
       console.error('Error loading products:', error);
       loading = false;
@@ -158,9 +180,122 @@
     }
   }
 
+  // @ts-ignore
+  function openStockModal(product) {
+    selectedProduct = product;
+    stockAdjustment = {
+      quantity: '',
+      reason: 'restock',
+      type: 'add'
+    };
+    showStockModal = true;
+  }
+
+  async function adjustStock() {
+    if (!stockAdjustment.quantity || parseInt(stockAdjustment.quantity) <= 0) {
+      showToast('Please enter a valid quantity', 'error');
+      return;
+    }
+
+    try {
+      const quantity = parseInt(stockAdjustment.quantity);
+      // @ts-ignore
+      const currentStock = selectedProduct.stock;
+      let newStock;
+
+      if (stockAdjustment.type === 'add') {
+        newStock = currentStock + quantity;
+      } else {
+        if (quantity > currentStock) {
+          showToast('Cannot remove more than available stock', 'error');
+          return;
+        }
+        newStock = currentStock - quantity;
+      }
+
+      await inventoryService.updateStock(
+        // @ts-ignore
+        selectedProduct.id, 
+        newStock, 
+        `${stockAdjustment.type}_${stockAdjustment.reason}`
+      );
+
+      // Reload logs
+      inventoryLogs = await inventoryService.getLogs(100);
+      
+      showStockModal = false;
+      showToast(`Stock ${stockAdjustment.type === 'add' ? 'added' : 'removed'} successfully`, 'success');
+    } catch (error) {
+      console.error('Error adjusting stock:', error);
+      showToast('Failed to adjust stock', 'error');
+    }
+  }
+
+  function exportLogsToCSV() {
+    if (inventoryLogs.length === 0) {
+      showToast('No logs to export', 'warning');
+      return;
+    }
+
+    const headers = [
+      'Date',
+      'Time',
+      'Product',
+      'Previous Stock',
+      'New Stock',
+      'Change',
+      'Reason',
+      'Type'
+    ];
+
+    // @ts-ignore
+    const rows = inventoryLogs.map(log => {
+      const date = log.createdAt?.toDate ? log.createdAt.toDate() : new Date(log.createdAt);
+      const reason = log.changeReason || 'manual';
+      const isAddition = log.changeQuantity > 0;
+      
+      return [
+        date.toLocaleDateString(),
+        date.toLocaleTimeString(),
+        log.productName,
+        log.previousStock,
+        log.newStock,
+        `${isAddition ? '+' : ''}${log.changeQuantity}`,
+        reason.replace(/_/g, ' '),
+        isAddition ? 'Addition' : 'Removal'
+      ];
+    });
+
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.join(','))
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const filename = `inventory_logs_${new Date().toISOString().split('T')[0]}.csv`;
+    
+    link.setAttribute('href', URL.createObjectURL(blob));
+    link.setAttribute('download', filename);
+    link.style.display = 'none';
+    
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    showToast(`Exported ${inventoryLogs.length} logs to ${filename}`, 'success');
+  }
+
   function updateProductEmoji() {
     const category = categories.find(c => c.id === newProduct.category);
     newProduct.image = category?.emoji || '🍽️';
+  }
+
+  // @ts-ignore
+  function formatDate(timestamp) {
+    if (!timestamp) return 'N/A';
+    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+    return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
   }
 
   // @ts-ignore
@@ -205,10 +340,20 @@
       </div>
     </div>
     
-    <button class="btn btn-primary" on:click={() => showAddModal = true}>
-      <Plus size={18} />
-      <span class="hidden sm-block">Add Product</span>
-    </button>
+    <div class="flex gap-2">
+      <button
+        class="btn btn-primary"
+        on:click={() => showLogsModal = true}
+      >
+        <History size={18} />
+        <span class="hidden sm-block">Inventory Logs</span>
+      </button>
+      
+      <button class="btn btn-primary" on:click={() => showAddModal = true}>
+        <Plus size={18} />
+        <span class="hidden sm-block">Add Product</span>
+      </button>
+    </div>
   </div>
 </header>
 
@@ -403,6 +548,13 @@
                         <X size={16} />
                       </button>
                     {:else}
+                      <button 
+                        class="btn btn-sm btn-ghost"
+                        on:click={() => openStockModal(product)}
+                        title="Adjust stock"
+                      >
+                        <Package size={16} />
+                      </button>
                       <button class="btn btn-sm btn-ghost" on:click={() => startEdit(product)}>
                         <Edit3 size={16} />
                       </button>
@@ -455,7 +607,6 @@
           </div>
           
           <div>
-            <!-- svelte-ignore a11y_label_has_associated_control -->
             <!-- svelte-ignore a11y_label_has_associated_control -->
             <label class="text-sm text-gray mb-1 block">Category</label>
             <select 
@@ -522,14 +673,188 @@
   </div>
 {/if}
 
+<!-- Stock Adjustment Modal -->
+{#if showStockModal && selectedProduct}
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="modal-overlay" on:click={() => showStockModal = false}>
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <div class="modal-content" on:click|stopPropagation style="max-width: 400px;">
+      <div class="card-body">
+        <div class="flex justify-between items-center mb-4">
+          <h2 class="text-xl font-bold">Adjust Stock</h2>
+          <button class="btn btn-icon btn-ghost" on:click={() => showStockModal = false}>
+            <X size={20} />
+          </button>
+        </div>
+        
+        <div class="mb-4 p-3 bg-gray-50 rounded">
+          <div class="flex items-center gap-2 mb-2">
+            <span class="text-2xl">{selectedProduct.image}</span>
+            <span class="font-medium">{selectedProduct.name}</span>
+          </div>
+          <p class="text-sm text-gray">Current Stock: <span class="font-bold">{selectedProduct.stock}</span></p>
+        </div>
+        
+        <form on:submit|preventDefault={adjustStock} class="flex flex-col gap-3">
+          <div>
+            <!-- svelte-ignore a11y_label_has_associated_control -->
+            <label class="text-sm text-gray mb-1 block">Adjustment Type</label>
+            <div class="flex gap-2">
+              <button
+                type="button"
+                class="flex-1 py-2 px-3 rounded border-2 transition-all {stockAdjustment.type === 'add' ? 'border-success bg-green-50 text-success' : 'border-gray-300'}"
+                on:click={() => stockAdjustment.type = 'add'}
+              >
+                <Plus size={16} class="inline mr-1" />
+                Add Stock
+              </button>
+              <button
+                type="button"
+                class="flex-1 py-2 px-3 rounded border-2 transition-all {stockAdjustment.type === 'remove' ? 'border-danger bg-red-50 text-danger' : 'border-gray-300'}"
+                on:click={() => stockAdjustment.type = 'remove'}
+              >
+                <Minus size={16} class="inline mr-1" />
+                Remove Stock
+              </button>
+            </div>
+          </div>
+          
+          <div>
+            <!-- svelte-ignore a11y_label_has_associated_control -->
+            <label class="text-sm text-gray mb-1 block">Quantity</label>
+            <input
+              type="number"
+              bind:value={stockAdjustment.quantity}
+              class="input"
+              placeholder="Enter quantity"
+              min="1"
+              required
+            />
+          </div>
+          
+          <div>
+            <!-- svelte-ignore a11y_label_has_associated_control -->
+            <label class="text-sm text-gray mb-1 block">Reason</label>
+            <select bind:value={stockAdjustment.reason} class="input">
+              {#each adjustmentReasons as reason}
+                <option value={reason.value}>{reason.label}</option>
+              {/each}
+            </select>
+          </div>
+          
+          <div class="flex gap-2 mt-4">
+            <button type="button" class="btn btn-secondary flex-1" on:click={() => showStockModal = false}>
+              Cancel
+            </button>
+            <button type="submit" class="btn btn-primary flex-1">
+              Confirm
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+{/if}
+
+<!-- Inventory Logs Modal -->
+{#if showLogsModal}
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="modal-overlay" on:click={() => showLogsModal = false}>
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <div class="modal-content" on:click|stopPropagation style="max-width: 800px; max-height: 80vh;">
+      <div class="card-body">
+        <div class="flex justify-between items-center mb-4">
+          <h2 class="text-xl font-bold">Inventory Logs</h2>
+          <div class="flex gap-2">
+            <button 
+              class="btn btn-primary btn-sm"
+              on:click={exportLogsToCSV}
+              disabled={inventoryLogs.length === 0}
+            >
+              <FileSpreadsheet size={16} />
+              <span>Export CSV</span>
+            </button>
+            <button class="btn btn-icon btn-ghost" on:click={() => showLogsModal = false}>
+              <X size={20} />
+            </button>
+          </div>
+        </div>
+        
+        <div class="overflow-y-auto" style="max-height: 60vh;">
+          {#if inventoryLogs.length === 0}
+            <div class="text-center p-8">
+              <p class="text-gray">No inventory logs found</p>
+            </div>
+          {:else}
+            <table class="w-full text-sm">
+              <thead class="sticky top-0 bg-white">
+                <tr class="border-b">
+                  <th class="text-left p-2">Date/Time</th>
+                  <th class="text-left p-2">Product</th>
+                  <th class="text-left p-2">Change</th>
+                  <th class="text-left p-2">Stock</th>
+                  <th class="text-left p-2">Reason</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each inventoryLogs as log}
+                  <tr class="border-b hover:bg-gray-50">
+                    <td class="p-2 text-xs">
+                      {formatDate(log.createdAt)}
+                    </td>
+                    <td class="p-2">
+                      <span class="font-medium">{log.productName}</span>
+                    </td>
+                    <td class="p-2">
+                      <span class="font-bold {log.changeQuantity > 0 ? 'text-success' : 'text-danger'}">
+                        {log.changeQuantity > 0 ? '+' : ''}{log.changeQuantity}
+                      </span>
+                    </td>
+                    <td class="p-2">
+                      <span class="text-gray">{log.previousStock}</span>
+                      <span class="mx-1">→</span>
+                      <span class="font-medium">{log.newStock}</span>
+                    </td>
+                    <td class="p-2">
+                      <span class="badge badge-info text-xs">
+                        {log.changeReason?.replace(/_/g, ' ') || 'manual'}
+                      </span>
+                    </td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          {/if}
+        </div>
+      </div>
+    </div>
+  </div>
+{/if}
+
 <style>
   .grid { display: grid; }
   .grid-cols-2 { grid-template-columns: repeat(2, 1fr); }
   .w-full { width: 100%; }
   .overflow-x-auto { overflow-x: auto; }
+  .overflow-y-auto { overflow-y: auto; }
   table th { font-weight: 600; color: var(--gray-700); }
   .flex-1 { flex: 1; }
   .hover\:bg-gray-50:hover { background-color: var(--gray-50); }
+  .sticky { position: sticky; }
+  .top-0 { top: 0; }
+  .bg-white { background-color: white; }
+  .bg-gray-50 { background-color: var(--gray-50); }
+  .bg-green-50 { background-color: #f0fdf4; }
+  .bg-red-50 { background-color: #fef2f2; }
+  .border-success { border-color: var(--success); }
+  .border-danger { border-color: var(--danger); }
+  .border-gray-300 { border-color: var(--gray-300); }
+  .text-xs { font-size: 0.75rem; }
+  .mx-1 { margin-left: 0.25rem; margin-right: 0.25rem; }
   
   @media (min-width: 1024px) {
     .lg-grid-cols-4 { grid-template-columns: repeat(4, 1fr); }

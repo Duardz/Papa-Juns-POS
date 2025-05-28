@@ -26,7 +26,8 @@
   let showSuccessModal = false;
   let lastOrderNumber = '';
   let lastOrderTotal = 0;
-  let selectedPaymentMethod = 'cash'; // Add payment method state
+  let selectedPaymentMethod = 'cash'; 
+  // Add payment method state
 
   // Categories
   const categories = [
