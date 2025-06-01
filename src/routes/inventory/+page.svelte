@@ -8,7 +8,7 @@
   import { 
     Package, Plus, Edit3, Trash2, Save, X, AlertTriangle, 
     // @ts-ignore
-    Search, ArrowLeft, TrendingDown, History, FileSpreadsheet, Eye
+    Search, ArrowLeft, TrendingDown, History, FileSpreadsheet, Eye, Trash, Calendar
   } from 'lucide-svelte';
 
   // State
@@ -16,6 +16,8 @@
   let products = [];
   // @ts-ignore
   let inventoryLogs = [];
+  // @ts-ignore
+  let availableMonths = [];
   let loading = true;
   let searchQuery = '';
   let selectedCategory = 'all';
@@ -25,6 +27,7 @@
   let showAddModal = false;
   let showLogsModal = false;
   let showStockModal = false;
+  let showClearLogsModal = false;
   // @ts-ignore
   let unsubscribe;
   // @ts-ignore
@@ -34,6 +37,11 @@
     reason: 'restock',
     type: 'add' // 'add' or 'remove'
   };
+
+  // Logs filtering
+  let selectedMonth = 'all'; // 'all' or 'YYYY-MM' format
+  let clearType = 'all'; // 'all' or 'month'
+  let selectedClearMonth = '';
 
   // New product form
   let newProduct = {
@@ -74,6 +82,17 @@
  // @ts-ignore
    $: totalValue = products.reduce((sum, p) => sum + (p.price * p.stock), 0);
 
+  // Filter logs by selected month
+  // @ts-ignore
+  $: filteredLogs = selectedMonth === 'all' 
+    ? inventoryLogs 
+    : inventoryLogs.filter(log => {
+        if (!log.createdAt) return false;
+        const date = log.createdAt.toDate ? log.createdAt.toDate() : new Date(log.createdAt);
+        const logMonth = `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}`;
+        return logMonth === selectedMonth;
+      });
+
   onMount(async () => {
     if (!$user) {
       goto('/auth/login');
@@ -88,8 +107,8 @@
         loading = false;
       });
       
-      // Load inventory logs
-      inventoryLogs = await inventoryService.getLogs(100);
+      // Load inventory logs and available months
+      await loadInventoryData();
     } catch (error) {
       console.error('Error loading products:', error);
       loading = false;
@@ -100,6 +119,24 @@
     // @ts-ignore
     if (unsubscribe) unsubscribe();
   });
+
+  async function loadInventoryData() {
+    try {
+      inventoryLogs = await inventoryService.getLogs(500); // Load more logs
+      availableMonths = await inventoryService.getAvailableMonths();
+    } catch (error) {
+      console.error('Error loading inventory data:', error);
+    }
+  }
+
+  async function loadLogsByMonth() {
+    if (selectedMonth === 'all') {
+      inventoryLogs = await inventoryService.getLogs(500);
+    } else {
+      const [year, month] = selectedMonth.split('-');
+      inventoryLogs = await inventoryService.getLogsByMonth(parseInt(year), parseInt(month));
+    }
+  }
 
   // @ts-ignore
   function startEdit(product) {
@@ -220,8 +257,8 @@
         `${stockAdjustment.type}_${stockAdjustment.reason}`
       );
 
-      // Reload logs
-      inventoryLogs = await inventoryService.getLogs(100);
+      // Reload logs and available months
+      await loadInventoryData();
       
       showStockModal = false;
       showToast(`Stock ${stockAdjustment.type === 'add' ? 'added' : 'removed'} successfully`, 'success');
@@ -231,8 +268,39 @@
     }
   }
 
+  async function clearInventoryLogs() {
+    const isConfirmed = clearType === 'all' 
+      ? confirm('Are you sure you want to clear ALL inventory logs? This action cannot be undone!')
+      : confirm(`Are you sure you want to clear logs for ${selectedClearMonth}? This action cannot be undone!`);
+    
+    if (!isConfirmed) return;
+
+    try {
+      let deletedCount = 0;
+      
+      if (clearType === 'all') {
+        deletedCount = await inventoryService.clearAllLogs();
+        showToast(`Successfully cleared ${deletedCount} inventory logs`, 'success');
+      } else {
+        const [year, month] = selectedClearMonth.split('-');
+        deletedCount = await inventoryService.clearLogsByMonth(parseInt(year), parseInt(month));
+        showToast(`Successfully cleared ${deletedCount} logs for ${selectedClearMonth}`, 'success');
+      }
+
+      // Reload data
+      await loadInventoryData();
+      
+      showClearLogsModal = false;
+    } catch (error) {
+      console.error('Error clearing logs:', error);
+      showToast('Failed to clear logs', 'error');
+    }
+  }
+
   function exportLogsToCSV() {
-    if (inventoryLogs.length === 0) {
+    const logsToExport = filteredLogs;
+    
+    if (logsToExport.length === 0) {
       showToast('No logs to export', 'warning');
       return;
     }
@@ -249,7 +317,7 @@
     ];
 
     // @ts-ignore
-    const rows = inventoryLogs.map(log => {
+    const rows = logsToExport.map(log => {
       const date = log.createdAt?.toDate ? log.createdAt.toDate() : new Date(log.createdAt);
       const reason = log.changeReason || 'manual';
       const isAddition = log.changeQuantity > 0;
@@ -273,7 +341,8 @@
 
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
-    const filename = `inventory_logs_${new Date().toISOString().split('T')[0]}.csv`;
+    const monthSuffix = selectedMonth !== 'all' ? `_${selectedMonth}` : '';
+    const filename = `inventory_logs${monthSuffix}_${new Date().toISOString().split('T')[0]}.csv`;
     
     link.setAttribute('href', URL.createObjectURL(blob));
     link.setAttribute('download', filename);
@@ -283,7 +352,7 @@
     link.click();
     document.body.removeChild(link);
 
-    showToast(`Exported ${inventoryLogs.length} logs to ${filename}`, 'success');
+    showToast(`Exported ${logsToExport.length} logs to ${filename}`, 'success');
   }
 
   function updateProductEmoji() {
@@ -296,6 +365,14 @@
     if (!timestamp) return 'N/A';
     const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
     return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+  }
+
+  // @ts-ignore
+  function formatMonth(monthStr) {
+    if (!monthStr) return '';
+    const [year, month] = monthStr.split('-');
+    const date = new Date(parseInt(year), parseInt(month) - 1);
+    return date.toLocaleDateString('en-US', { year: 'numeric', month: 'long' });
   }
 
   // @ts-ignore
@@ -715,7 +792,7 @@
                 class="flex-1 py-2 px-3 rounded border-2 transition-all {stockAdjustment.type === 'remove' ? 'border-danger bg-red-50 text-danger' : 'border-gray-300'}"
                 on:click={() => stockAdjustment.type = 'remove'}
               >
-                <Minus size={16} class="inline mr-1" />
+                <Trash size={16} class="inline mr-1" />
                 Remove Stock
               </button>
             </div>
@@ -765,15 +842,23 @@
   <div class="modal-overlay" on:click={() => showLogsModal = false}>
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <!-- svelte-ignore a11y_click_events_have_key_events -->
-    <div class="modal-content" on:click|stopPropagation style="max-width: 800px; max-height: 80vh;">
+    <div class="modal-content" on:click|stopPropagation style="max-width: 900px; max-height: 85vh;">
       <div class="card-body">
         <div class="flex justify-between items-center mb-4">
           <h2 class="text-xl font-bold">Inventory Logs</h2>
           <div class="flex gap-2">
             <button 
+              class="btn btn-danger btn-sm"
+              on:click={() => showClearLogsModal = true}
+              disabled={inventoryLogs.length === 0}
+            >
+              <Trash size={16} />
+              <span>Clear Logs</span>
+            </button>
+            <button 
               class="btn btn-primary btn-sm"
               on:click={exportLogsToCSV}
-              disabled={inventoryLogs.length === 0}
+              disabled={filteredLogs.length === 0}
             >
               <FileSpreadsheet size={16} />
               <span>Export CSV</span>
@@ -783,11 +868,37 @@
             </button>
           </div>
         </div>
+
+        <!-- Month Filter -->
+        <div class="mb-4 p-3 bg-gray-50 rounded">
+          <div class="flex items-center gap-3 flex-wrap">
+            <!-- svelte-ignore a11y_label_has_associated_control -->
+            <label class="text-sm font-medium">Filter by Month:</label>
+            <select 
+              bind:value={selectedMonth} 
+              on:change={loadLogsByMonth}
+              class="input"
+              style="width: 200px;"
+            >
+              <option value="all">All Months ({inventoryLogs.length} logs)</option>
+              {#each availableMonths as month}
+                <option value={month}>{formatMonth(month)}</option>
+              {/each}
+            </select>
+            <span class="text-sm text-gray">
+              Showing {filteredLogs.length} log{filteredLogs.length !== 1 ? 's' : ''}
+            </span>
+          </div>
+        </div>
         
         <div class="overflow-y-auto" style="max-height: 60vh;">
-          {#if inventoryLogs.length === 0}
+          {#if filteredLogs.length === 0}
             <div class="text-center p-8">
-              <p class="text-gray">No inventory logs found</p>
+              {#if selectedMonth === 'all'}
+                <p class="text-gray">No inventory logs found</p>
+              {:else}
+                <p class="text-gray">No logs found for {formatMonth(selectedMonth)}</p>
+              {/if}
             </div>
           {:else}
             <table class="w-full text-sm">
@@ -801,7 +912,7 @@
                 </tr>
               </thead>
               <tbody>
-                {#each inventoryLogs as log}
+                {#each filteredLogs as log}
                   <tr class="border-b hover:bg-gray-50">
                     <td class="p-2 text-xs">
                       {formatDate(log.createdAt)}
@@ -829,6 +940,96 @@
               </tbody>
             </table>
           {/if}
+        </div>
+      </div>
+    </div>
+  </div>
+{/if}
+
+<!-- Clear Logs Confirmation Modal -->
+{#if showClearLogsModal}
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="modal-overlay" on:click={() => showClearLogsModal = false}>
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <div class="modal-content" on:click|stopPropagation style="max-width: 500px;">
+      <div class="card-body">
+        <div class="flex justify-between items-center mb-4">
+          <h2 class="text-xl font-bold text-danger">Clear Inventory Logs</h2>
+          <button class="btn btn-icon btn-ghost" on:click={() => showClearLogsModal = false}>
+            <X size={20} />
+          </button>
+        </div>
+        
+        <div class="mb-4">
+          <div class="alert alert-warning mb-4">
+            <AlertTriangle size={20} />
+            <span>This action cannot be undone!</span>
+          </div>
+          
+          <div class="flex flex-col gap-3">
+            <!-- svelte-ignore a11y_label_has_associated_control -->
+            <label class="text-sm font-medium">Clear Options:</label>
+            
+            <div class="flex gap-2">
+              <button
+                type="button"
+                class="flex-1 py-3 px-4 rounded border-2 transition-all {clearType === 'all' ? 'border-danger bg-red-50 text-danger' : 'border-gray-300'}"
+                on:click={() => clearType = 'all'}
+              >
+                <Trash size={16} class="inline mr-2" />
+                Clear All Logs
+                <div class="text-xs mt-1 opacity-75">
+                  ({inventoryLogs.length} total logs)
+                </div>
+              </button>
+              
+              <button
+                type="button"
+                class="flex-1 py-3 px-4 rounded border-2 transition-all {clearType === 'month' ? 'border-danger bg-red-50 text-danger' : 'border-gray-300'}"
+                on:click={() => clearType = 'month'}
+              >
+                <Calendar size={16} class="inline mr-2" />
+                Clear by Month
+                <div class="text-xs mt-1 opacity-75">
+                  Select specific month
+                </div>
+              </button>
+            </div>
+            
+            {#if clearType === 'month'}
+              <div class="mt-3">
+                <!-- svelte-ignore a11y_label_has_associated_control -->
+                <label class="text-sm text-gray mb-1 block">Select Month to Clear:</label>
+                <select bind:value={selectedClearMonth} class="input">
+                  <option value="">Choose a month...</option>
+                  {#each availableMonths as month}
+                    <option value={month}>{formatMonth(month)}</option>
+                  {/each}
+                </select>
+              </div>
+            {/if}
+          </div>
+        </div>
+        
+        <div class="flex gap-2">
+          <button 
+            type="button" 
+            class="btn btn-secondary flex-1" 
+            on:click={() => showClearLogsModal = false}
+          >
+            Cancel
+          </button>
+          <button 
+            type="button" 
+            class="btn btn-danger flex-1"
+            on:click={clearInventoryLogs}
+            disabled={clearType === 'month' && !selectedClearMonth}
+          >
+            <Trash size={16} />
+            {clearType === 'all' ? 'Clear All Logs' : 'Clear Selected Month'}
+          </button>
         </div>
       </div>
     </div>

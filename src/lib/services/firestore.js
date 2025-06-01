@@ -392,6 +392,151 @@ export const inventoryService = {
     }
   },
 
+  // Get inventory logs by month/year
+  async getLogsByMonth(year, month) {
+    try {
+      checkDb();
+      
+      // Create start and end dates for the month
+      const startDate = new Date(year, month - 1, 1); // month is 0-indexed
+      const endDate = new Date(year, month, 0, 23, 59, 59, 999); // Last day of month
+      
+      const q = query(
+        collection(db, 'inventory-logs'),
+        where('createdAt', '>=', startDate),
+        where('createdAt', '<=', endDate),
+        orderBy('createdAt', 'desc')
+      );
+      
+      const snapshot = await getDocs(q);
+      return snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+    } catch (error) {
+      console.error('Error fetching inventory logs by month:', error);
+      return [];
+    }
+  },
+
+  // Clear all inventory logs
+  async clearAllLogs() {
+    try {
+      checkDb();
+      
+      // Get all inventory logs
+      const logsRef = collection(db, 'inventory-logs');
+      const snapshot = await getDocs(logsRef);
+      
+      if (snapshot.empty) {
+        console.log('No inventory logs to delete');
+        return 0;
+      }
+      
+      // Delete in batches (Firestore has a limit of 500 operations per batch)
+      const batchSize = 500;
+      let deleted = 0;
+      
+      // Process in chunks
+      const docs = snapshot.docs;
+      for (let i = 0; i < docs.length; i += batchSize) {
+        const batch = writeBatch(db);
+        const chunk = docs.slice(i, i + batchSize);
+        
+        chunk.forEach(doc => {
+          batch.delete(doc.ref);
+        });
+        
+        await batch.commit();
+        deleted += chunk.length;
+        console.log(`Deleted ${deleted} inventory logs so far...`);
+      }
+      
+      console.log(`Successfully deleted ${deleted} inventory logs`);
+      return deleted;
+    } catch (error) {
+      console.error('Error clearing inventory logs:', error);
+      throw error;
+    }
+  },
+
+  // Clear inventory logs by month
+  async clearLogsByMonth(year, month) {
+    try {
+      checkDb();
+      
+      // Create start and end dates for the month
+      const startDate = new Date(year, month - 1, 1);
+      const endDate = new Date(year, month, 0, 23, 59, 59, 999);
+      
+      // Get logs for the specific month
+      const q = query(
+        collection(db, 'inventory-logs'),
+        where('createdAt', '>=', startDate),
+        where('createdAt', '<=', endDate)
+      );
+      
+      const snapshot = await getDocs(q);
+      
+      if (snapshot.empty) {
+        console.log(`No inventory logs found for ${year}-${month.toString().padStart(2, '0')}`);
+        return 0;
+      }
+      
+      // Delete in batches
+      const batchSize = 500;
+      let deleted = 0;
+      
+      const docs = snapshot.docs;
+      for (let i = 0; i < docs.length; i += batchSize) {
+        const batch = writeBatch(db);
+        const chunk = docs.slice(i, i + batchSize);
+        
+        chunk.forEach(doc => {
+          batch.delete(doc.ref);
+        });
+        
+        await batch.commit();
+        deleted += chunk.length;
+        console.log(`Deleted ${deleted} logs for ${year}-${month.toString().padStart(2, '0')} so far...`);
+      }
+      
+      console.log(`Successfully deleted ${deleted} inventory logs for ${year}-${month.toString().padStart(2, '0')}`);
+      return deleted;
+    } catch (error) {
+      console.error('Error clearing inventory logs by month:', error);
+      throw error;
+    }
+  },
+
+  // Get available months/years with logs
+  async getAvailableMonths() {
+    try {
+      checkDb();
+      const q = query(
+        collection(db, 'inventory-logs'),
+        orderBy('createdAt', 'desc')
+      );
+      
+      const snapshot = await getDocs(q);
+      const months = new Set();
+      
+      snapshot.docs.forEach(doc => {
+        const data = doc.data();
+        if (data.createdAt) {
+          const date = data.createdAt.toDate ? data.createdAt.toDate() : new Date(data.createdAt);
+          const monthYear = `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}`;
+          months.add(monthYear);
+        }
+      });
+      
+      return Array.from(months).sort().reverse(); // Most recent first
+    } catch (error) {
+      console.error('Error fetching available months:', error);
+      return [];
+    }
+  },
+
   // Bulk update stock
   async bulkUpdateStock(updates) {
     try {
