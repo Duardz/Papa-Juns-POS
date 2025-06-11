@@ -2,8 +2,6 @@
 
 Papa Jun's POS is a point-of-sale system I'm developing for restaurants and food service businesses. Right now, what you're seeing is the frontend interface that demonstrates how the system will work once it's fully connected to a backend database.
 
-**[See the demo here](your-demo-link-here)**
-
 ## Current Status
 
 This project is in an interesting phase - I've built out the complete user interface and workflow, but it's currently running as a demo without real database connections. Think of it as a working prototype that shows exactly how the final system will look and feel.
@@ -149,16 +147,6 @@ To contribute:
 ## License
 
 This project is available under the MIT License, making it free to use for both personal and commercial purposes.
-
-## Contact
-
-I'm always interested in discussing this project with restaurant owners, developers, or anyone curious about POS system development:
-
-- Email: [your-email@example.com]
-- GitHub: [your-github-username]
-- Project Issues: [GitHub Issues URL]
-
-Whether you want to see a demo, discuss implementation, or contribute to development, don't hesitate to reach out.
 
 ## Acknowledgments
 
